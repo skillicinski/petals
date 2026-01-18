@@ -14,10 +14,17 @@ Requirements:
 """
 
 import os
+import sys
+from pathlib import Path
 
 import boto3
 import pytest
 from testcontainers.localstack import LocalStackContainer
+
+# Add project root to path so tests can import from src
+PROJECT_ROOT = Path(__file__).parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 # Pin LocalStack version for reproducible tests
 # v4.8+ has native Batch support

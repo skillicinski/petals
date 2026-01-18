@@ -7,3 +7,20 @@
 **Pipelines are standalone.** Each pipeline is deployed independently without impacting others. Isolated blast radius, simple reasoning.
 
 **Pipelines are idempotent.** Every process that involves data should produce predictable outputs. Change detection is key to produce efficient writes of new data without altering closed historical information.
+
+---
+
+## Tables
+
+### reference.tickers
+
+**Purpose:** Master list of tradeable instruments from Massive (formerly Polygon.io) API.
+
+**Primary Key:** `(ticker, market)` composite - same symbol can exist in different markets (e.g., BITW in both `stocks` and `otc`).
+
+**Change Strategy:** SCD Type 1 (upsert) - existing records updated in place, new records inserted. Each new pipeline run retieves records with a `last_updated_utc` more recent than the previous run.
+
+**Design Notes:**
+- Considered SCD Type 2 (valid_from/valid_to) but `list_date` requires detail endpoint (1 call per ticker, 146+ hours for backfill at rate limit)
+- `delisted_utc` from bulk API provides delisting date when available
+- `active` boolean indicates current trading status
