@@ -15,33 +15,39 @@ def run(
     table_bucket_arn: str | None = None,
     region: str = "us-east-1",
     limit: int = 1000,
+    force_recreate: bool | None = None,
 ) -> None:
     """
     Run the ticker pipeline.
-    
+
     Args:
         api_key: Massive API key (or set MASSIVE_API_KEY env var)
         table_bucket_arn: S3 Table Bucket ARN (or set TABLE_BUCKET_ARN env var)
         region: AWS region
         limit: Results per page when fetching
+        force_recreate: Drop and recreate table on schema mismatch (or set FORCE_RECREATE=1)
     """
     api_key = api_key or os.environ.get("MASSIVE_API_KEY")
     if not api_key:
         raise ValueError("MASSIVE_API_KEY required")
-    
+
     table_bucket_arn = table_bucket_arn or os.environ.get("TABLE_BUCKET_ARN")
     if not table_bucket_arn:
         raise ValueError("TABLE_BUCKET_ARN required")
-    
+
+    if force_recreate is None:
+        force_recreate = os.environ.get("FORCE_RECREATE", "").lower() in ("1", "true")
+
     print("Fetching tickers from Massive API...")
     tickers = list(fetch_tickers(api_key, limit=limit))
     print(f"Fetched {len(tickers)} tickers")
-    
+
     print(f"Loading to S3 Tables ({table_bucket_arn})...")
     load_tickers(
         tickers,
         table_bucket_arn=table_bucket_arn,
         region=region,
+        force_recreate=force_recreate,
     )
     print("Done!")
 

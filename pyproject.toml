@@ -13,8 +13,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "moto[batch]>=5.0.0",
     "pytest>=8.0.0",
     "ruff>=0.8.0",
+    "testcontainers[localstack]>=4.10.0",
 ]
 
 [tool.ruff]

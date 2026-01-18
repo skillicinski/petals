@@ -6,13 +6,12 @@ import pyarrow as pa
 from pyiceberg.catalog import load_catalog
 from pyiceberg.exceptions import NoSuchTableError
 from pyiceberg.schema import Schema
-from pyiceberg.types import StringType, BooleanType, NestedField
-
+from pyiceberg.types import BooleanType, NestedField, StringType
 
 # Schema for ticker reference data
 TICKER_SCHEMA = Schema(
     NestedField(1, "ticker", StringType(), required=True),
-    NestedField(2, "name", StringType(), required=True),
+    NestedField(2, "name", StringType(), required=False),
     NestedField(3, "market", StringType(), required=False),
     NestedField(4, "locale", StringType(), required=False),
     NestedField(5, "primary_exchange", StringType(), required=False),
@@ -27,7 +26,7 @@ TICKER_SCHEMA = Schema(
 def get_catalog(table_bucket_arn: str, region: str = "us-east-1"):
     """
     Get PyIceberg catalog connected to S3 Tables REST endpoint.
-    
+
     Args:
         table_bucket_arn: ARN of the S3 Table Bucket
         region: AWS region
@@ -78,7 +77,7 @@ def tickers_to_arrow(tickers: list[dict]) -> pa.Table:
         schema=pa.schema(
             [
                 pa.field("ticker", pa.string(), nullable=False),
-                pa.field("name", pa.string(), nullable=False),
+                pa.field("name", pa.string(), nullable=True),
                 pa.field("market", pa.string(), nullable=True),
                 pa.field("locale", pa.string(), nullable=True),
                 pa.field("primary_exchange", pa.string(), nullable=True),
@@ -98,30 +97,49 @@ def load_tickers(
     namespace: str = "reference",
     table_name: str = "tickers",
     region: str = "us-east-1",
+    force_recreate: bool = False,
 ) -> None:
     """
     Load tickers to S3 Tables Iceberg table.
-    
+
     Creates namespace and table if they don't exist.
     Overwrites existing data (full refresh).
+
+    Args:
+        tickers: List of ticker dicts from Massive API
+        table_bucket_arn: ARN of the S3 Table Bucket
+        namespace: Iceberg namespace (default: reference)
+        table_name: Table name (default: tickers)
+        region: AWS region
+        force_recreate: Drop and recreate table if schema mismatch
     """
     catalog = get_catalog(table_bucket_arn, region)
-    
+
     # Ensure namespace exists
     ensure_namespace(catalog, namespace)
-    
+
     table_id = f"{namespace}.{table_name}"
-    
+
     # Create or replace table
     arrow_table = tickers_to_arrow(tickers)
-    
+
     try:
         table = catalog.load_table(table_id)
         print(f"Table exists: {table_id}, overwriting...")
-        table.overwrite(arrow_table)
+        try:
+            table.overwrite(arrow_table)
+        except ValueError as e:
+            if "Mismatch in fields" in str(e) and force_recreate:
+                print("Schema mismatch detected, recreating table...")
+                # S3 Tables requires purge=True when dropping tables
+                catalog.drop_table(table_id, purge_requested=True)
+                table = catalog.create_table(table_id, schema=TICKER_SCHEMA)
+                table.overwrite(arrow_table)
+            else:
+                raise
     except NoSuchTableError:
         print(f"Creating table: {table_id}")
         table = catalog.create_table(table_id, schema=TICKER_SCHEMA)
         table.overwrite(arrow_table)
-    
+
     print(f"Loaded {len(tickers)} tickers to {table_id}")
