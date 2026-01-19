@@ -2,6 +2,14 @@
 
 A personal project demonstrating end-to-end data platform design and implementation.
 
+## Scope
+
+- **Extract** - Ingest data from external sources
+- **Transform** - Enrich and normalize raw data
+- **Load** - Land processed data in S3 with a data catalog
+- **Orchestration** - Schedule and monitor processes
+- **Analytics** - Monitor platform performance and health
+
 ## Setup
 
 ```bash
@@ -33,10 +41,20 @@ uv run python -m src.pipelines.tickers.main
 uv run pytest tests/ -v
 ```
 
-## Scope
+## Deploy to AWS
 
-- **Extract** - Ingest data from external sources
-- **Transform** - Enrich and normalize raw data
-- **Load** - Land processed data in S3 with a data catalog
-- **Orchestration** - Schedule and monitor processes
-- **Analytics** - Monitor platform performance and health
+```bash
+# Prerequisites: AWS CLI configured, Secrets Manager secret "petals/Massive" with API key
+
+# Deploy infrastructure
+cd cdk
+uv run cdk deploy petals-shared petals-tickers-pipeline
+
+# Build and push container
+docker build -t petals-tickers-pipeline .
+aws ecr get-login-password | docker login --username AWS --password-stdin <account>.dkr.ecr.us-east-1.amazonaws.com
+docker tag petals-tickers-pipeline:latest <account>.dkr.ecr.us-east-1.amazonaws.com/petals-tickers-pipeline:latest
+docker push <account>.dkr.ecr.us-east-1.amazonaws.com/petals-tickers-pipeline:latest
+```
+
+Pipeline runs daily at 6 AM UTC. See `DEV_NOTES.md` for detailed configuration.
