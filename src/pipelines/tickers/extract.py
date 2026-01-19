@@ -59,18 +59,18 @@ def fetch_tickers(
         rate_limit_delay: Base seconds to wait between requests (free tier = 5/min)
         max_retries: Max consecutive rate limit retries before giving up
     """
-    base_url = 'https://api.polygon.io/v3/reference/tickers'
+    base_url = "https://api.polygon.io/v3/reference/tickers"
 
     # Build URL with ordering for incremental fetches
-    params = f'limit={limit}'
+    params = f"limit={limit}"
     if updated_since:
         # Order by last_updated_utc descending to get newest first
-        params += '&order=desc&sort=last_updated_utc'
-        print(f'Incremental mode: fetching tickers updated since {updated_since.isoformat()}')
+        params += "&order=desc&sort=last_updated_utc"
+        print(f"Incremental mode: fetching tickers updated since {updated_since.isoformat()}")
     else:
-        print('Full extraction mode: fetching all tickers')
+        print("Full extraction mode: fetching all tickers")
 
-    url = f'{base_url}?{params}&apiKey={api_key}'
+    url = f"{base_url}?{params}&apiKey={api_key}"
     page = 0
     total_yielded = 0
     cutoff_reached = False
@@ -83,43 +83,41 @@ def fetch_tickers(
             req = urllib.request.Request(url)
             try:
                 with urllib.request.urlopen(req) as response:
-                    data = json.loads(response.read().decode('utf-8'))
+                    data = json.loads(response.read().decode("utf-8"))
                 break  # Success, exit retry loop
             except urllib.error.HTTPError as e:
                 if e.code == 429:
                     retries += 1
                     wait_time = rate_limit_delay * (2 ** (retries - 1))  # Exponential backoff
                     print(
-                        f'Rate limited (attempt {retries}/{max_retries})'
-                        f', waiting {wait_time:.0f}s...'
+                        f"Rate limited (attempt {retries}/{max_retries})"
+                        f", waiting {wait_time:.0f}s..."
                     )
                     time.sleep(wait_time)
                 else:
                     raise
 
         if data is None:
-            raise RuntimeError(f'Max retries ({max_retries}) exceeded on page {page}')
+            raise RuntimeError(f"Max retries ({max_retries}) exceeded on page {page}")
 
-        results = data.get('results', [])
+        results = data.get("results", [])
         page_yielded = 0
 
         for ticker in results:
             # Check if we've reached the cutoff (incremental mode)
             if updated_since:
-                last_updated = ticker.get('last_updated_utc')
+                last_updated = ticker.get("last_updated_utc")
                 if last_updated:
                     # Parse ISO timestamp (handles both with and without Z suffix)
                     try:
-                        ticker_updated = datetime.fromisoformat(
-                            last_updated.replace('Z', '+00:00')
-                        )
+                        ticker_updated = datetime.fromisoformat(last_updated.replace("Z", "+00:00"))
                         # Make updated_since timezone-aware if needed
                         if updated_since.tzinfo is None:
                             ticker_updated = ticker_updated.replace(tzinfo=None)
 
                         if ticker_updated < updated_since:
                             cutoff_reached = True
-                            print(f'Reached cutoff at {last_updated}, stopping fetch')
+                            print(f"Reached cutoff at {last_updated}, stopping fetch")
                             break
                     except ValueError:
                         pass  # Skip timestamp parsing errors, include the record
@@ -129,15 +127,15 @@ def fetch_tickers(
             page_yielded += 1
 
         page += 1
-        print(f'Page {page}: fetched {page_yielded} tickers (total: {total_yielded})')
+        print(f"Page {page}: fetched {page_yielded} tickers (total: {total_yielded})")
 
         if cutoff_reached:
             break
 
         # Handle pagination
-        next_url = data.get('next_url')
+        next_url = data.get("next_url")
         if next_url:
-            url = f'{next_url}&apiKey={api_key}'
+            url = f"{next_url}&apiKey={api_key}"
             time.sleep(rate_limit_delay)  # Respect rate limits between pages
         else:
             url = None
@@ -145,17 +143,17 @@ def fetch_tickers(
 
 def main():
     """Fetch tickers and print count (for testing)."""
-    api_key = os.environ.get('MASSIVE_API_KEY')
+    api_key = os.environ.get("MASSIVE_API_KEY")
     if not api_key:
-        raise ValueError('MASSIVE_API_KEY environment variable required')
+        raise ValueError("MASSIVE_API_KEY environment variable required")
 
     tickers = list(fetch_tickers(api_key))
-    print(f'Fetched {len(tickers)} tickers')
+    print(f"Fetched {len(tickers)} tickers")
 
     # Show sample
     if tickers:
-        print(f'Sample: {tickers[0]}')
+        print(f"Sample: {tickers[0]}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

@@ -10,6 +10,22 @@
 
 ---
 
+## Architecture
+
+Key architectural choices and rationale:
+
+**Batch over Lambda** - Full extractions take ~15 minutes; Batch with Fargate Spot handles longer runs and provides significant cost savings.
+
+**Step Functions over direct EventBridge → Batch** - Enables state tracking (last_run_time), error handling with failure recording, and visible execution history.
+
+**S3 Tables over regular S3 + Glue Catalog** - Native Iceberg support with automatic compaction, integrated Lake Formation permissions, no catalog management overhead.
+
+**Shared infrastructure stack** - DynamoDB state table and S3 Tables bucket are shared across pipelines; lifecycle decoupled from individual pipeline stacks.
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for system diagram.
+
+---
+
 ## Tables
 
 ### reference.tickers

@@ -1,0 +1,36 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.ruff_cache
+.mypy_cache
+
+# Virtual environments
+.venv
+venv
+
+# IDE
+.idea
+.vscode
+.cursor
+
+# CDK
+cdk.out
+cdk/cdk.out
+
+# Docs
+docs/
+*.md
+!README.md
+
+# Tests (not needed in prod image)
+tests/
+
+# Environment files
+.env
+.env.*

@@ -124,9 +124,7 @@ def batch_setup(aws_credentials):
             jobQueueName="test-job-queue",
             state="ENABLED",
             priority=1,
-            computeEnvironmentOrder=[
-                {"order": 1, "computeEnvironment": "test-compute-env"}
-            ],
+            computeEnvironmentOrder=[{"order": 1, "computeEnvironment": "test-compute-env"}],
         )
 
         yield {

@@ -3,18 +3,11 @@ from aws_cdk import (
     RemovalPolicy,
     Stack,
 )
-from aws_cdk import (
-    aws_athena as athena,
-)
-from aws_cdk import (
-    aws_iam as iam,
-)
-from aws_cdk import (
-    aws_s3 as s3,
-)
-from aws_cdk import (
-    aws_s3tables as s3tables,
-)
+from aws_cdk import aws_athena as athena
+from aws_cdk import aws_dynamodb as dynamodb
+from aws_cdk import aws_iam as iam
+from aws_cdk import aws_s3 as s3
+from aws_cdk import aws_s3tables as s3tables
 from constructs import Construct
 
 
@@ -74,6 +67,23 @@ class SharedStack(Stack):
             ["sts:AssumeRole", "sts:SetSourceIdentity", "sts:TagSession"],
         )
 
+        # =================================================================
+        # Pipeline State (DynamoDB) - shared across all pipelines
+        # =================================================================
+        # Stores last run timestamps, status, etc. for all pipelines.
+        # Single table with pipeline_id partition key for cost efficiency.
+        self.pipeline_state_table = dynamodb.Table(
+            self,
+            "PipelineState",
+            table_name="petals-pipeline-state",
+            partition_key=dynamodb.Attribute(
+                name="pipeline_id",
+                type=dynamodb.AttributeType.STRING,
+            ),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            removal_policy=RemovalPolicy.RETAIN,
+        )
+
         # Athena query results bucket
         self.athena_results_bucket = s3.Bucket(
             self,
@@ -111,4 +121,20 @@ class SharedStack(Stack):
             value=self.table_bucket.attr_table_bucket_arn,
             export_name="petals-table-bucket-arn",
             description="S3 Table Bucket ARN",
+        )
+
+        CfnOutput(
+            self,
+            "PipelineStateTableName",
+            value=self.pipeline_state_table.table_name,
+            export_name="petals-pipeline-state-table-name",
+            description="DynamoDB table for pipeline state",
+        )
+
+        CfnOutput(
+            self,
+            "PipelineStateTableArn",
+            value=self.pipeline_state_table.table_arn,
+            export_name="petals-pipeline-state-table-arn",
+            description="DynamoDB table ARN for pipeline state",
         )
