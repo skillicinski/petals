@@ -57,4 +57,4 @@ docker tag petals-tickers-pipeline:latest <account>.dkr.ecr.us-east-1.amazonaws.
 docker push <account>.dkr.ecr.us-east-1.amazonaws.com/petals-tickers-pipeline:latest
 ```
 
-Pipeline runs daily at 6 AM UTC. See `DEV_NOTES.md` for detailed configuration.
+Pipeline runs daily at 6 AM UTC. See `docs/` for architecture and design documentation.
