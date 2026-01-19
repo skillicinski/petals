@@ -17,11 +17,11 @@ import faulthandler
 import os
 import sys
 
-# Enable faulthandler - prints traceback on segfault/SIGABRT/SIGFPE/SIGBUS
-faulthandler.enable(file=sys.stderr, all_threads=True)
-
 from .extract import fetch_tickers
 from .load import get_incremental_cutoff, load_tickers, table_exists
+
+# Enable faulthandler - prints traceback on segfault/SIGABRT/SIGFPE/SIGBUS
+faulthandler.enable(file=sys.stderr, all_threads=True)
 
 
 def log(msg: str) -> None:

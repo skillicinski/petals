@@ -151,6 +151,7 @@ def get_incremental_cutoff(hours_ago: int = 24) -> datetime:
 def log(msg: str) -> None:
     """Print and flush immediately to ensure logs are captured before crashes."""
     import sys
+
     print(msg)
     sys.stdout.flush()
 
@@ -229,7 +230,10 @@ def load_tickers(
             end_idx = min((i + 1) * batch_size, deduped_count)
             batch = arrow_table.slice(start_idx, end_idx - start_idx)
 
-            log(f"[load] Batch {i + 1}/{num_batches}: rows {start_idx}-{end_idx} ({len(batch)} rows)")
+            log(
+                f"[load] Batch {i + 1}/{num_batches}: "
+                f"rows {start_idx}-{end_idx} ({len(batch)} rows)"
+            )
             log(f"[load] Batch memory: {batch.nbytes / 1024 / 1024:.2f} MB")
 
             try:
