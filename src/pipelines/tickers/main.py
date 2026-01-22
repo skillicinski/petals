@@ -17,8 +17,10 @@ import faulthandler
 import os
 import sys
 
+import psutil
+
 from .extract import fetch_tickers
-from .load import get_incremental_cutoff, load_tickers, table_exists
+from .load import load_tickers, table_exists
 
 # Enable faulthandler - prints traceback on segfault/SIGABRT/SIGFPE/SIGBUS
 faulthandler.enable(file=sys.stderr, all_threads=True)
@@ -30,13 +32,20 @@ def log(msg: str) -> None:
     sys.stdout.flush()
 
 
+def log_memory(label: str) -> None:
+    """Log current memory usage with a label."""
+    proc = psutil.Process()
+    mem = proc.memory_info()
+    rss_mb = mem.rss / 1024 / 1024
+    log(f"[memory] {label}: {rss_mb:.1f} MB RSS")
+
+
 def run(
     api_key: str | None = None,
     table_bucket_arn: str | None = None,
     region: str = "us-east-1",
     limit: int = 1000,
     force_full: bool = False,
-    incremental_hours: int = 24,
     last_run_time: str | None = None,
 ) -> dict:
     """
@@ -48,10 +57,7 @@ def run(
         region: AWS region
         limit: Results per page when fetching
         force_full: Force full extraction even if table exists (or set FORCE_FULL=1)
-        incremental_hours: Hours to look back for incremental updates (default: 24,
-                           or set INCREMENTAL_HOURS env var)
         last_run_time: ISO timestamp from last pipeline run (or set LAST_RUN_TIME env var)
-                       Takes precedence over incremental_hours when set.
 
     Returns:
         Stats dict with rows_inserted and rows_updated counts
@@ -70,29 +76,22 @@ def run(
     # Get last run time from env if not provided
     last_run_time = last_run_time or os.environ.get("LAST_RUN_TIME", "").strip()
 
-    incremental_hours_env = os.environ.get("INCREMENTAL_HOURS")
-    if incremental_hours_env:
-        incremental_hours = int(incremental_hours_env)
-
     log("[main] Pipeline starting")
-    log(f"[main] force_full={force_full}, incremental_hours={incremental_hours}")
-    log(f"[main] last_run_time={last_run_time or '(not set)'}")
+    log(f"[main] force_full={force_full}, last_run_time={last_run_time or '(not set)'}")
+    log_memory("startup")
 
     # Determine if incremental or full load
     updated_since = None
     if not force_full:
         log("[main] Checking for existing table...")
         if table_exists(table_bucket_arn, region=region):
-            # Use last_run_time if available (from orchestrator), otherwise fall back to hours
             if last_run_time:
                 from datetime import datetime
 
                 updated_since = datetime.fromisoformat(last_run_time.replace("Z", "+00:00"))
                 log(f"[main] Incremental mode (since last run: {updated_since.isoformat()})")
             else:
-                updated_since = get_incremental_cutoff(hours_ago=incremental_hours)
-                cutoff = updated_since.isoformat()
-                log(f"[main] Incremental mode (last {incremental_hours}h, since {cutoff})")
+                log("[main] No last_run_time available, full extraction mode")
         else:
             log("[main] Table does not exist, full extraction mode")
 
@@ -100,6 +99,7 @@ def run(
     log("[main] Fetching tickers from Massive API...")
     tickers = list(fetch_tickers(api_key, limit=limit, updated_since=updated_since))
     log(f"[main] Fetched {len(tickers)} tickers")
+    log_memory("post-extract")
 
     if len(tickers) == 0:
         log("[main] No new tickers to load")
@@ -114,6 +114,7 @@ def run(
     )
 
     log(f"[main] Done! {result['rows_inserted']} inserted, {result['rows_updated']} updated")
+    log_memory("complete")
     return result
 
 

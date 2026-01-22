@@ -171,7 +171,7 @@ class TickersPipelineStack(Stack):
                 },
                 assign_public_ip=True,  # Required to reach Secrets Manager/ECR without NAT
             ),
-            timeout=Duration.minutes(30),
+            timeout=Duration.minutes(60),
             retry_attempts=1,
         )
 
@@ -298,7 +298,7 @@ class TickersPipelineStack(Stack):
             "TickersPipelineStateMachine",
             state_machine_name="petals-tickers-pipeline",
             definition_body=sfn.DefinitionBody.from_chainable(definition),
-            timeout=Duration.minutes(45),
+            timeout=Duration.minutes(75),
             tracing_enabled=True,
         )
 

@@ -3,9 +3,10 @@ Load ticker data to S3 Tables (Iceberg).
 
 Uses SCD Type 1 (update in place) with PyIceberg's native upsert.
 The (ticker, market) composite key identifies rows for upsert matching.
-"""
 
-from datetime import datetime, timedelta
+PyIceberg's upsert automatically detects unchanged rows and skips them,
+so we don't need manual change detection logic.
+"""
 
 import pyarrow as pa
 from pyiceberg.catalog import load_catalog
@@ -131,29 +132,22 @@ def table_exists(
         return False
 
 
-def get_incremental_cutoff(hours_ago: int = 24) -> datetime:
-    """
-    Get cutoff timestamp for incremental fetching.
-
-    Uses current time minus a buffer. This is more reliable than using
-    max(last_updated_utc) from the table, because that timestamp reflects
-    when Massive last updated the ticker, not when we last ran the pipeline.
-
-    For proper tracking, this should eventually be replaced with a state store
-    (DynamoDB, Step Functions, etc.) that records actual pipeline run times.
-
-    Args:
-        hours_ago: How many hours back to look for updates (default: 24)
-    """
-    return datetime.utcnow() - timedelta(hours=hours_ago)
-
-
 def log(msg: str) -> None:
     """Print and flush immediately to ensure logs are captured before crashes."""
     import sys
 
     print(msg)
     sys.stdout.flush()
+
+
+def log_memory(label: str) -> None:
+    """Log current memory usage with a label."""
+    import psutil
+
+    proc = psutil.Process()
+    mem = proc.memory_info()
+    rss_mb = mem.rss / 1024 / 1024
+    log(f"[memory] {label}: {rss_mb:.1f} MB RSS")
 
 
 def load_tickers(
@@ -168,8 +162,8 @@ def load_tickers(
     Load tickers to S3 Tables Iceberg table using upsert.
 
     Creates namespace and table if they don't exist.
-    Uses upsert to only write changed rows (matched by ticker, market).
-    Processes in batches to isolate failures and reduce memory pressure.
+    Uses PyIceberg's upsert which automatically detects unchanged rows.
+    Processes in batches to avoid S3 Tables API issues with large payloads.
 
     Args:
         tickers: List of ticker dicts from Massive API
@@ -186,11 +180,10 @@ def load_tickers(
     import traceback
 
     log(f"[load] Starting load_tickers with {len(tickers)} tickers")
-    log(f"[load] batch_size={batch_size}, region={region}")
 
     # Allow override via env var for testing
     batch_size = int(os.environ.get("UPSERT_BATCH_SIZE", batch_size))
-    log(f"[load] Effective batch_size={batch_size}")
+    log(f"[load] batch_size={batch_size}")
 
     log("[load] Getting catalog...")
     catalog = get_catalog(table_bucket_arn, region)
@@ -212,6 +205,7 @@ def load_tickers(
         log(f"[load] Incoming: {deduped_count} tickers")
 
     log(f"[load] Arrow table memory: {arrow_table.nbytes / 1024 / 1024:.2f} MB")
+    log_memory("post-arrow-convert")
 
     total_inserted = 0
     total_updated = 0
@@ -219,9 +213,8 @@ def load_tickers(
     try:
         table = catalog.load_table(table_id)
         log(f"[load] Table exists: {table_id}")
-        log(f"[load] Table schema: {table.schema()}")
 
-        # Process in batches
+        # Process in batches to avoid S3 Tables API issues
         num_batches = (deduped_count + batch_size - 1) // batch_size
         log(f"[load] Will process {num_batches} batches of up to {batch_size} rows")
 
@@ -234,7 +227,7 @@ def load_tickers(
                 f"[load] Batch {i + 1}/{num_batches}: "
                 f"rows {start_idx}-{end_idx} ({len(batch)} rows)"
             )
-            log(f"[load] Batch memory: {batch.nbytes / 1024 / 1024:.2f} MB")
+            log_memory(f"batch-{i + 1}-start")
 
             try:
                 log(f"[load] Starting upsert for batch {i + 1}...")
@@ -251,6 +244,7 @@ def load_tickers(
                 raise
 
         log(f"[load] All batches complete: {total_inserted} inserted, {total_updated} updated")
+        log_memory("complete")
         return {"rows_inserted": total_inserted, "rows_updated": total_updated}
 
     except NoSuchTableError:
@@ -259,6 +253,7 @@ def load_tickers(
         log("[load] Table created, appending data...")
         table.append(arrow_table)
         log(f"[load] Initial load complete: {deduped_count} tickers")
+        log_memory("complete")
         return {"rows_inserted": deduped_count, "rows_updated": 0}
     except Exception as e:
         log(f"[load] FATAL ERROR: {type(e).__name__}: {e}")

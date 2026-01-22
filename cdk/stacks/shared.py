@@ -15,25 +15,22 @@ class SharedStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        # S3 Table Bucket for Iceberg tables
+        # =================================================================
+        # S3 Tables / Lake Formation
+        # =================================================================
+        # Table bucket for Iceberg tables
         self.table_bucket = s3tables.CfnTableBucket(
             self,
             "TableBucket",
             table_bucket_name=f"petals-tables-{self.account}",
         )
 
-        # IAM role for Lake Formation to access S3 Tables
-        # This role is used by the S3 Tables integration with Lake Formation/Glue.
+        # Role for S3 Tables integration with Lake Formation/Glue.
         # The integration itself is set up manually via Lake Formation console:
         #   1. Go to Lake Formation > Catalogs
         #   2. Click "Enable S3 Table integration"
         #   3. Select this role
         #   4. Check "Allow external engines to access data..."
-        #
-        # Key requirements for the role:
-        # - Trust policy must allow sts:AssumeRole, sts:SetSourceIdentity, sts:TagSession
-        # - Conditions should restrict to this account and Lake Formation service
-        # - Role needs s3tables:* and s3:* permissions
         self.lakeformation_role = iam.Role(
             self,
             "LakeFormationS3TablesRole",
@@ -68,7 +65,133 @@ class SharedStack(Stack):
         )
 
         # =================================================================
-        # Pipeline State (DynamoDB) - shared across all pipelines
+        # Athena (query layer)
+        # =================================================================
+        self.athena_results_bucket = s3.Bucket(
+            self,
+            "AthenaResultsBucket",
+            bucket_name=f"petals-athena-results-{self.account}",
+            removal_policy=RemovalPolicy.DESTROY,
+            auto_delete_objects=True,
+        )
+
+        self.athena_workgroup = athena.CfnWorkGroup(
+            self,
+            "AthenaWorkgroup",
+            name="petals",
+            work_group_configuration=athena.CfnWorkGroup.WorkGroupConfigurationProperty(
+                result_configuration=athena.CfnWorkGroup.ResultConfigurationProperty(
+                    output_location=f"s3://{self.athena_results_bucket.bucket_name}/",
+                ),
+                enforce_work_group_configuration=True,
+            ),
+        )
+
+        # =================================================================
+        # CLI User (for local development / Athena queries)
+        # =================================================================
+        # Primary IAM user for CLI access. Created via CDK for full lifecycle
+        # management. To import an existing user into CDK management:
+        #   cdk import petals-shared AWS::IAM::User CliUser
+        # Then provide the username "petals-cli" when prompted.
+        #
+        # Access keys are managed separately (console or CLI) and are not
+        # affected by CDK deployments.
+        self.cli_user = iam.User(
+            self,
+            "CliUser",
+            user_name="petals-cli",
+        )
+
+        # IAM policy for Athena / S3 Tables access
+        cli_athena_policy = iam.Policy(
+            self,
+            "CliUserAthenaPolicy",
+            policy_name="petals-cli-athena-access",
+            statements=[
+                # Athena workgroup access
+                iam.PolicyStatement(
+                    sid="AthenaWorkgroup",
+                    actions=[
+                        "athena:StartQueryExecution",
+                        "athena:StopQueryExecution",
+                        "athena:GetQueryExecution",
+                        "athena:GetQueryResults",
+                        "athena:GetWorkGroup",
+                        "athena:ListQueryExecutions",
+                        "athena:BatchGetQueryExecution",
+                    ],
+                    resources=[
+                        f"arn:aws:athena:{self.region}:{self.account}:workgroup/petals",
+                    ],
+                ),
+                # S3 results bucket access
+                iam.PolicyStatement(
+                    sid="AthenaResultsBucket",
+                    actions=[
+                        "s3:GetObject",
+                        "s3:PutObject",
+                        "s3:ListBucket",
+                        "s3:GetBucketLocation",
+                        "s3:AbortMultipartUpload",
+                    ],
+                    resources=[
+                        self.athena_results_bucket.bucket_arn,
+                        f"{self.athena_results_bucket.bucket_arn}/*",
+                    ],
+                ),
+                # Glue catalog access (for Athena metadata queries)
+                iam.PolicyStatement(
+                    sid="GlueCatalog",
+                    actions=[
+                        "glue:GetDatabase",
+                        "glue:GetDatabases",
+                        "glue:GetTable",
+                        "glue:GetTables",
+                        "glue:GetPartition",
+                        "glue:GetPartitions",
+                        "glue:BatchGetPartition",
+                    ],
+                    resources=[
+                        f"arn:aws:glue:{self.region}:{self.account}:catalog",
+                        f"arn:aws:glue:{self.region}:{self.account}:database/*",
+                        f"arn:aws:glue:{self.region}:{self.account}:table/*/*",
+                    ],
+                ),
+                # Lake Formation access (required for S3 Tables federated catalog)
+                iam.PolicyStatement(
+                    sid="LakeFormation",
+                    actions=[
+                        "lakeformation:GetDataAccess",
+                    ],
+                    resources=["*"],
+                ),
+                # S3 Tables read access (for direct table queries)
+                iam.PolicyStatement(
+                    sid="S3TablesRead",
+                    actions=[
+                        "s3tables:GetTable",
+                        "s3tables:GetTableBucket",
+                        "s3tables:GetTableData",
+                        "s3tables:ListTables",
+                        "s3tables:ListTableBuckets",
+                        "s3tables:GetNamespace",
+                        "s3tables:ListNamespaces",
+                    ],
+                    resources=[
+                        self.table_bucket.attr_table_bucket_arn,
+                        f"{self.table_bucket.attr_table_bucket_arn}/*",
+                    ],
+                ),
+            ],
+        )
+        cli_athena_policy.attach_to_user(self.cli_user)
+
+        # Lake Formation grants for S3 Tables federated catalog must be
+        # configured manually via console. See README.md in this directory.
+
+        # =================================================================
+        # Pipeline State (DynamoDB)
         # =================================================================
         # Stores last run timestamps, status, etc. for all pipelines.
         # Single table with pipeline_id partition key for cost efficiency.
@@ -84,29 +207,9 @@ class SharedStack(Stack):
             removal_policy=RemovalPolicy.RETAIN,
         )
 
-        # Athena query results bucket
-        self.athena_results_bucket = s3.Bucket(
-            self,
-            "AthenaResultsBucket",
-            bucket_name=f"petals-athena-results-{self.account}",
-            removal_policy=RemovalPolicy.DESTROY,
-            auto_delete_objects=True,
-        )
-
-        # Athena workgroup with results location pre-configured
-        self.athena_workgroup = athena.CfnWorkGroup(
-            self,
-            "AthenaWorkgroup",
-            name="petals",
-            work_group_configuration=athena.CfnWorkGroup.WorkGroupConfigurationProperty(
-                result_configuration=athena.CfnWorkGroup.ResultConfigurationProperty(
-                    output_location=f"s3://{self.athena_results_bucket.bucket_name}/",
-                ),
-                enforce_work_group_configuration=True,
-            ),
-        )
-
+        # =================================================================
         # Outputs
+        # =================================================================
         CfnOutput(
             self,
             "TableBucketName",

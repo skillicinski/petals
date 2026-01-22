@@ -72,7 +72,7 @@ class TestBatchCompute:
         template.has_resource_properties(
             "AWS::Batch::JobDefinition",
             {
-                "Timeout": {"AttemptDurationSeconds": 1800},  # 30 min
+                "Timeout": {"AttemptDurationSeconds": 3600},  # 60 min
             },
         )
 

@@ -20,5 +20,5 @@ cdk.out/
 .DS_Store
 
 # Local dev notes
-DEV_NOTES.md
+DEVLOG.md
 AGENTS.md

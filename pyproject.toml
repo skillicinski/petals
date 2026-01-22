@@ -8,6 +8,7 @@ dependencies = [
     "boto3>=1.42.30",
     "constructs>=10.0.0",
     "polars>=1.37.1",
+    "psutil>=5.9.0",
     "pyarrow>=22.0.0",
     "pyiceberg>=0.10.0",
 ]
