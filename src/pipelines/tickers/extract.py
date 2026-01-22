@@ -32,43 +32,34 @@ from datetime import datetime
 from typing import Iterator
 
 
-def fetch_tickers(
+def _fetch_tickers_paginated(
     api_key: str,
-    limit: int = 1000,
-    updated_since: datetime | None = None,
-    rate_limit_delay: float = 15.0,
-    max_retries: int = 10,
+    active: bool,
+    limit: int,
+    updated_since: datetime | None,
+    rate_limit_delay: float,
+    max_retries: int,
 ) -> Iterator[dict]:
     """
-    Fetch tickers from Massive API, handling pagination.
-
-    For incremental fetching, pass `updated_since` to only fetch tickers
-    updated after that timestamp. Results are ordered by last_updated_utc
-    descending, and fetching stops when older records are encountered.
-
-    Uses stdlib only (urllib).
-
-    Yields dicts with keys including:
-        ticker, name, market, locale, primary_exchange, type, active,
-        currency_name, cik, composite_figi, delisted_utc, last_updated_utc
+    Internal: fetch tickers with a specific active filter, handling pagination.
 
     Args:
         api_key: Massive API key
+        active: Filter for active (True) or inactive/delisted (False) tickers
         limit: Results per page (max 1000)
-        updated_since: Only fetch tickers updated after this timestamp (incremental mode)
-        rate_limit_delay: Base seconds to wait between requests (free tier = 5/min)
+        updated_since: Only fetch tickers updated after this timestamp
+        rate_limit_delay: Base seconds to wait between requests
         max_retries: Max consecutive rate limit retries before giving up
     """
     base_url = "https://api.polygon.io/v3/reference/tickers"
+    active_str = "true" if active else "false"
+    label = "active" if active else "inactive"
 
-    # Build URL with ordering for incremental fetches
-    params = f"limit={limit}"
+    # Build URL with active filter and ordering for incremental fetches
+    params = f"limit={limit}&active={active_str}"
     if updated_since:
         # Order by last_updated_utc descending to get newest first
         params += "&order=desc&sort=last_updated_utc"
-        print(f"Incremental mode: fetching tickers updated since {updated_since.isoformat()}")
-    else:
-        print("Full extraction mode: fetching all tickers")
 
     url = f"{base_url}?{params}&apiKey={api_key}"
     page = 0
@@ -90,7 +81,7 @@ def fetch_tickers(
                     retries += 1
                     wait_time = rate_limit_delay * (2 ** (retries - 1))  # Exponential backoff
                     print(
-                        f"Rate limited (attempt {retries}/{max_retries})"
+                        f"[{label}] Rate limited (attempt {retries}/{max_retries})"
                         f", waiting {wait_time:.0f}s..."
                     )
                     time.sleep(wait_time)
@@ -98,7 +89,7 @@ def fetch_tickers(
                     raise
 
         if data is None:
-            raise RuntimeError(f"Max retries ({max_retries}) exceeded on page {page}")
+            raise RuntimeError(f"[{label}] Max retries ({max_retries}) exceeded on page {page}")
 
         results = data.get("results", [])
         page_yielded = 0
@@ -107,27 +98,31 @@ def fetch_tickers(
             # Check if we've reached the cutoff (incremental mode)
             if updated_since:
                 last_updated = ticker.get("last_updated_utc")
-                if last_updated:
-                    # Parse ISO timestamp (handles both with and without Z suffix)
-                    try:
-                        ticker_updated = datetime.fromisoformat(last_updated.replace("Z", "+00:00"))
-                        # Make updated_since timezone-aware if needed
-                        if updated_since.tzinfo is None:
-                            ticker_updated = ticker_updated.replace(tzinfo=None)
+                if not last_updated:
+                    # Skip tickers without timestamps in incremental mode
+                    # (e.g., indices which have no last_updated_utc)
+                    continue
 
-                        if ticker_updated < updated_since:
-                            cutoff_reached = True
-                            print(f"Reached cutoff at {last_updated}, stopping fetch")
-                            break
-                    except ValueError:
-                        pass  # Skip timestamp parsing errors, include the record
+                # Parse ISO timestamp (handles both with and without Z suffix)
+                try:
+                    ticker_updated = datetime.fromisoformat(last_updated.replace("Z", "+00:00"))
+                    # Make updated_since timezone-aware if needed
+                    if updated_since.tzinfo is None:
+                        ticker_updated = ticker_updated.replace(tzinfo=None)
+
+                    if ticker_updated < updated_since:
+                        cutoff_reached = True
+                        print(f"[{label}] Reached cutoff at {last_updated}, stopping fetch")
+                        break
+                except ValueError:
+                    pass  # Skip timestamp parsing errors, include the record
 
             yield ticker
             total_yielded += 1
             page_yielded += 1
 
         page += 1
-        print(f"Page {page}: fetched {page_yielded} tickers (total: {total_yielded})")
+        print(f"[{label}] Page {page}: fetched {page_yielded} tickers (total: {total_yielded})")
 
         if cutoff_reached:
             break
@@ -140,6 +135,69 @@ def fetch_tickers(
         else:
             url = None
 
+    print(f"[{label}] Fetch complete: {total_yielded} tickers")
+
+
+def fetch_tickers(
+    api_key: str,
+    limit: int = 1000,
+    updated_since: datetime | None = None,
+    rate_limit_delay: float = 15.0,
+    max_retries: int = 10,
+    include_inactive: bool = True,
+) -> Iterator[dict]:
+    """
+    Fetch tickers from Massive API, handling pagination.
+
+    Fetches both active and inactive (delisted) tickers by default.
+    The API requires separate calls for active=true and active=false.
+
+    For incremental fetching, pass `updated_since` to only fetch tickers
+    updated after that timestamp. Results are ordered by last_updated_utc
+    descending, and fetching stops when older records are encountered.
+
+    Uses stdlib only (urllib).
+
+    Yields dicts with keys including:
+        ticker, name, market, locale, primary_exchange, type, active,
+        currency_name, cik, composite_figi, delisted_utc, last_updated_utc
+
+    Args:
+        api_key: Massive API key
+        limit: Results per page (max 1000)
+        updated_since: Only fetch tickers updated after this timestamp (incremental mode)
+        rate_limit_delay: Base seconds to wait between requests (free tier = 5/min)
+        max_retries: Max consecutive rate limit retries before giving up
+        include_inactive: Also fetch inactive/delisted tickers (default: True)
+    """
+    if updated_since:
+        print(f"Incremental mode: fetching tickers updated since {updated_since.isoformat()}")
+    else:
+        print("Full extraction mode: fetching all tickers")
+
+    # Fetch active tickers
+    print("Fetching active tickers...")
+    yield from _fetch_tickers_paginated(
+        api_key=api_key,
+        active=True,
+        limit=limit,
+        updated_since=updated_since,
+        rate_limit_delay=rate_limit_delay,
+        max_retries=max_retries,
+    )
+
+    # Fetch inactive/delisted tickers
+    if include_inactive:
+        print("Fetching inactive/delisted tickers...")
+        yield from _fetch_tickers_paginated(
+            api_key=api_key,
+            active=False,
+            limit=limit,
+            updated_since=updated_since,
+            rate_limit_delay=rate_limit_delay,
+            max_retries=max_retries,
+        )
+
 
 def main():
     """Fetch tickers and print count (for testing)."""
@@ -148,11 +206,20 @@ def main():
         raise ValueError("MASSIVE_API_KEY environment variable required")
 
     tickers = list(fetch_tickers(api_key))
-    print(f"Fetched {len(tickers)} tickers")
+    active_count = sum(1 for t in tickers if t.get("active"))
+    inactive_count = len(tickers) - active_count
 
-    # Show sample
+    print(f"Fetched {len(tickers)} tickers ({active_count} active, {inactive_count} inactive)")
+
+    # Show samples
     if tickers:
-        print(f"Sample: {tickers[0]}")
+        active_sample = next((t for t in tickers if t.get("active")), None)
+        inactive_sample = next((t for t in tickers if not t.get("active")), None)
+        if active_sample:
+            print(f"Active sample: {active_sample.get('ticker')} - {active_sample.get('name')}")
+        if inactive_sample:
+            ticker, name = inactive_sample.get("ticker"), inactive_sample.get("name")
+            print(f"Inactive sample: {ticker} - {name}")
 
 
 if __name__ == "__main__":
