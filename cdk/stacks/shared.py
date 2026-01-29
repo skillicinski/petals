@@ -5,6 +5,7 @@ from aws_cdk import (
 )
 from aws_cdk import aws_athena as athena
 from aws_cdk import aws_dynamodb as dynamodb
+from aws_cdk import aws_ecr as ecr
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_s3 as s3
 from aws_cdk import aws_s3tables as s3tables
@@ -191,6 +192,24 @@ class SharedStack(Stack):
         # configured manually via console. See README.md in this directory.
 
         # =================================================================
+        # Shared ECR Repository (all pipelines)
+        # =================================================================
+        # Single image containing all pipeline code. Each pipeline sets
+        # the PIPELINE env var to select which module to run.
+        self.ecr_repo = ecr.Repository(
+            self,
+            "PipelinesRepo",
+            repository_name="petals-pipelines",
+            removal_policy=RemovalPolicy.RETAIN,
+            lifecycle_rules=[
+                ecr.LifecycleRule(
+                    max_image_count=10,
+                    description="Keep only 10 images",
+                )
+            ],
+        )
+
+        # =================================================================
         # Pipeline State (DynamoDB)
         # =================================================================
         # Stores last run timestamps, status, etc. for all pipelines.
@@ -240,4 +259,20 @@ class SharedStack(Stack):
             value=self.pipeline_state_table.table_arn,
             export_name="petals-pipeline-state-table-arn",
             description="DynamoDB table ARN for pipeline state",
+        )
+
+        CfnOutput(
+            self,
+            "ECRRepositoryArn",
+            value=self.ecr_repo.repository_arn,
+            export_name="petals-ecr-repo-arn",
+            description="Shared ECR repository ARN for all pipelines",
+        )
+
+        CfnOutput(
+            self,
+            "ECRRepositoryUri",
+            value=self.ecr_repo.repository_uri,
+            export_name="petals-ecr-repo-uri",
+            description="Shared ECR repository URI for docker push",
         )

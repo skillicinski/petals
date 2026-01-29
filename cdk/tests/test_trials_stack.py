@@ -1,5 +1,5 @@
 """
-CDK assertion tests for the tickers pipeline stack.
+CDK assertion tests for the clinical trials pipeline stack.
 
 Tests verify that synthesized CloudFormation templates contain expected
 resources with correct configurations. This catches misconfigurations
@@ -11,7 +11,7 @@ Run with: uv run pytest cdk/tests/ -v
 import pytest
 from aws_cdk import App, Environment
 from aws_cdk.assertions import Match, Template
-from stacks.pipelines.tickers import TickersPipelineStack
+from stacks.pipelines.trials import TrialsPipelineStack
 
 
 @pytest.fixture
@@ -20,7 +20,7 @@ def template():
     app = App()
     # Use dummy account/region for VPC lookup during synth
     env = Environment(account="123456789012", region="us-east-1")
-    stack = TickersPipelineStack(app, "test-tickers-pipeline", env=env)
+    stack = TrialsPipelineStack(app, "test-trials-pipeline", env=env)
     return Template.from_stack(stack)
 
 
@@ -35,27 +35,27 @@ class TestBatchCompute:
         """Job queue is created with correct name."""
         template.has_resource_properties(
             "AWS::Batch::JobQueue",
-            {"JobQueueName": "petals-tickers-queue"},
+            {"JobQueueName": "petals-trials-queue"},
         )
 
     def test_creates_job_definition(self, template):
         """Job definition is created with correct name."""
         template.has_resource_properties(
             "AWS::Batch::JobDefinition",
-            {"JobDefinitionName": "petals-tickers-job"},
+            {"JobDefinitionName": "petals-trials-job"},
         )
 
     def test_job_has_timeout(self, template):
-        """Job definition has timeout configured."""
+        """Job definition has timeout configured (120 min for large dataset)."""
         template.has_resource_properties(
             "AWS::Batch::JobDefinition",
             {
-                "Timeout": {"AttemptDurationSeconds": 3600},  # 60 min
+                "Timeout": {"AttemptDurationSeconds": 7200},  # 120 min
             },
         )
 
     def test_job_has_pipeline_env_var(self, template):
-        """Job definition specifies tickers pipeline module."""
+        """Job definition specifies trials pipeline module."""
         template.has_resource_properties(
             "AWS::Batch::JobDefinition",
             {
@@ -65,7 +65,7 @@ class TestBatchCompute:
                             Match.object_like(
                                 {
                                     "Name": "PIPELINE",
-                                    "Value": "src.pipelines.tickers.main",
+                                    "Value": "src.pipelines.trials.main",
                                 }
                             )
                         ]
@@ -82,7 +82,7 @@ class TestStepFunctions:
         """State machine is created with correct name."""
         template.has_resource_properties(
             "AWS::StepFunctions::StateMachine",
-            {"StateMachineName": "petals-tickers-pipeline"},
+            {"StateMachineName": "petals-trials-pipeline"},
         )
 
     def test_has_xray_tracing(self, template):
@@ -96,8 +96,6 @@ class TestStepFunctions:
 
     def test_has_error_handling(self, template):
         """State machine definition includes error handling (Catch block)."""
-        # The state machine definition contains Fn::Join with parts that include "Catch"
-        # We verify by checking the definition structure contains our error handling states
         template.has_resource_properties(
             "AWS::StepFunctions::StateMachine",
             {
@@ -124,14 +122,14 @@ class TestEventBridgeSchedule:
         """Schedule rule is created with correct name."""
         template.has_resource_properties(
             "AWS::Events::Rule",
-            {"Name": "petals-tickers-daily"},
+            {"Name": "petals-trials-daily"},
         )
 
-    def test_schedule_is_daily_6am_utc(self, template):
-        """Schedule runs daily at 6 AM UTC."""
+    def test_schedule_is_daily_7am_utc(self, template):
+        """Schedule runs daily at 7 AM UTC (offset from tickers at 6 AM)."""
         template.has_resource_properties(
             "AWS::Events::Rule",
-            {"ScheduleExpression": "cron(0 6 ? * * *)"},
+            {"ScheduleExpression": "cron(0 7 ? * * *)"},
         )
 
 
@@ -142,7 +140,7 @@ class TestIAMPermissions:
         """Job execution role is created."""
         template.has_resource_properties(
             "AWS::IAM::Role",
-            {"RoleName": "petals-tickers-job-role"},
+            {"RoleName": "petals-trials-job-role"},
         )
 
     def test_job_role_has_scoped_s3tables_access(self, template):
@@ -163,6 +161,19 @@ class TestIAMPermissions:
                             )
                         ]
                     ),
+                },
+            },
+        )
+
+    def test_no_secrets_required(self, template):
+        """Clinical trials pipeline should NOT have Secrets Manager access (public API)."""
+        # Verify no secrets are configured in the container
+        template.has_resource_properties(
+            "AWS::Batch::JobDefinition",
+            {
+                "ContainerProperties": {
+                    # Secrets array should not exist or be empty
+                    "Secrets": Match.absent(),
                 },
             },
         )

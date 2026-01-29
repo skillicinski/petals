@@ -10,20 +10,29 @@ Petals is a data platform for market data, built on AWS with infrastructure-as-c
 flowchart TB
     subgraph External["External Services"]
         API[Massive API]
+        CTGOV[ClinicalTrials.gov API]
         SM[Secrets Manager]
     end
 
-    subgraph Orchestration["Tickers Pipeline (petals-tickers-pipeline)"]
-        EB[EventBridge<br/>Daily 6 AM UTC]
-        SFN[Step Functions]
-        BATCH[AWS Batch<br/>Fargate Spot]
-        ECR[ECR]
+    subgraph TickersPipeline["Tickers Pipeline (petals-tickers-pipeline)"]
+        EB1[EventBridge<br/>Daily 6 AM UTC]
+        SFN1[Step Functions]
+        BATCH1[AWS Batch<br/>Fargate Spot]
     end
 
-    subgraph Storage["Shared Stack (petals-shared)"]
-        direction LR
+    subgraph TrialsPipeline["Trials Pipeline (petals-trials-pipeline)"]
+        EB2[EventBridge<br/>Daily 7 AM UTC]
+        SFN2[Step Functions]
+        BATCH2[AWS Batch<br/>Fargate Spot]
+    end
+
+    subgraph Shared["Shared Stack (petals-shared)"]
+        ECR[ECR<br/>petals-pipelines]
         DDB[(DynamoDB<br/>Pipeline State)]
-        S3T[(S3 Tables<br/>Iceberg)]
+        subgraph S3Tables["S3 Tables (Iceberg)"]
+            NS_REF[reference.*]
+            NS_CLINICAL[clinical.*]
+        end
     end
 
     subgraph Query["Query Layer"]
@@ -31,24 +40,43 @@ flowchart TB
         USER[Analyst / dbt]
     end
 
-    %% Main pipeline flow (top to bottom)
-    API --> BATCH
-    SM --> BATCH
-    EB --> SFN
-    SFN <-->|state| DDB
-    SFN --> BATCH
-    ECR --> BATCH
-    BATCH -->|upsert| S3T
+    %% Tickers pipeline flow
+    API --> BATCH1
+    SM --> BATCH1
+    EB1 --> SFN1
+    SFN1 <-->|state| DDB
+    SFN1 --> BATCH1
+    ECR --> BATCH1
+    BATCH1 -->|upsert| NS_REF
 
-    %% Query flow (parallel, side access to storage)
+    %% Trials pipeline flow
+    CTGOV --> BATCH2
+    EB2 --> SFN2
+    SFN2 <-->|state| DDB
+    SFN2 --> BATCH2
+    ECR --> BATCH2
+    BATCH2 -->|upsert| NS_CLINICAL
+
+    %% Query flow
     USER --> ATH
-    ATH --> S3T
+    ATH --> S3Tables
 ```
 
 ## Data Flow
 
-**Pipeline (daily):**
-EventBridge triggers Step Functions → reads last run time from DynamoDB → submits Batch job → container fetches from Massive API (incremental) → upserts to S3 Tables → records new timestamp
+### Tickers Pipeline (daily)
+EventBridge triggers Step Functions → reads last run time from DynamoDB → submits Batch job → container fetches from Massive API (incremental) → upserts to S3 Tables `reference.tickers` → records new timestamp
 
-**Query:**
+### Trials Pipeline (daily)
+EventBridge triggers Step Functions → reads last run time from DynamoDB → submits Batch job → container fetches COMPLETED studies from ClinicalTrials.gov (filtered to INDUSTRY sponsors) → upserts to S3 Tables `clinical.trials` → records new timestamp
+
+### Query
 Athena queries S3 Tables via federated catalog (`s3tablescatalog`)
+
+## Namespaces
+
+| Namespace | Table | Description |
+|-----------|-------|-------------|
+| `reference` | `tickers` | Stock/ETF ticker reference data from Massive API |
+| `clinical` | `trials` | Completed clinical trials from ClinicalTrials.gov (INDUSTRY sponsors) |
+

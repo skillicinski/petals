@@ -6,7 +6,7 @@ Run with: uv run pytest cdk/tests/test_shared_stack.py -v
 
 import pytest
 from aws_cdk import App
-from aws_cdk.assertions import Template
+from aws_cdk.assertions import Match, Template
 from stacks.shared import SharedStack
 
 
@@ -82,5 +82,45 @@ class TestS3TableBucket:
             "TableBucketArn",
             {
                 "Export": {"Name": "petals-table-bucket-arn"},
+            },
+        )
+
+
+class TestECRRepository:
+    """Tests for shared ECR repository (all pipelines)."""
+
+    def test_creates_ecr_repo(self, template):
+        """ECR repository is created with correct name."""
+        template.has_resource_properties(
+            "AWS::ECR::Repository",
+            {"RepositoryName": "petals-pipelines"},
+        )
+
+    def test_has_lifecycle_policy(self, template):
+        """ECR repo has lifecycle rule to limit image count."""
+        template.has_resource_properties(
+            "AWS::ECR::Repository",
+            {
+                "LifecyclePolicy": {
+                    "LifecyclePolicyText": Match.string_like_regexp(r'"countNumber":\s*10'),
+                },
+            },
+        )
+
+    def test_exports_repo_arn(self, template):
+        """ECR repo ARN is exported for cross-stack reference."""
+        template.has_output(
+            "ECRRepositoryArn",
+            {
+                "Export": {"Name": "petals-ecr-repo-arn"},
+            },
+        )
+
+    def test_exports_repo_uri(self, template):
+        """ECR repo URI is exported for docker push."""
+        template.has_output(
+            "ECRRepositoryUri",
+            {
+                "Export": {"Name": "petals-ecr-repo-uri"},
             },
         )

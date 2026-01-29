@@ -1,12 +1,15 @@
 """
-CDK stack for the tickers pipeline.
+CDK stack for the trials pipeline.
+
+Fetches completed clinical trials from ClinicalTrials.gov (INDUSTRY sponsors).
 
 Components:
-- DynamoDB table for pipeline state (last run timestamp)
 - Batch compute environment (Fargate Spot for cost optimization)
 - Batch job queue and job definition
 - Step Functions state machine for orchestration
 - EventBridge rule for daily scheduling
+
+Note: No secrets needed - ClinicalTrials.gov API is public.
 """
 
 from aws_cdk import (
@@ -26,13 +29,12 @@ from aws_cdk import aws_events as events
 from aws_cdk import aws_events_targets as targets
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_logs as logs
-from aws_cdk import aws_secretsmanager as secretsmanager
 from aws_cdk import aws_stepfunctions as sfn
 from aws_cdk import aws_stepfunctions_tasks as tasks
 from constructs import Construct
 
 
-class TickersPipelineStack(Stack):
+class TrialsPipelineStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
@@ -48,16 +50,6 @@ class TickersPipelineStack(Stack):
             self,
             "PipelineState",
             state_table_arn,
-        )
-
-        # =================================================================
-        # Secrets (API Key)
-        # =================================================================
-        # Reference existing secret (created manually to avoid key in code)
-        self.api_secret = secretsmanager.Secret.from_secret_name_v2(
-            self,
-            "MassiveApiKey",
-            "petals/Massive",
         )
 
         # =================================================================
@@ -84,8 +76,8 @@ class TickersPipelineStack(Stack):
         # =================================================================
         self.compute_env = batch.FargateComputeEnvironment(
             self,
-            "TickersComputeEnv",
-            compute_environment_name="petals-tickers-compute",
+            "TrialsComputeEnv",
+            compute_environment_name="petals-trials-compute",
             vpc=self.vpc,
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
             spot=True,  # Use Spot for cost savings (up to 70% off)
@@ -97,8 +89,8 @@ class TickersPipelineStack(Stack):
         # =================================================================
         self.job_queue = batch.JobQueue(
             self,
-            "TickersJobQueue",
-            job_queue_name="petals-tickers-queue",
+            "TrialsJobQueue",
+            job_queue_name="petals-trials-queue",
             compute_environments=[
                 batch.OrderedComputeEnvironment(
                     compute_environment=self.compute_env,
@@ -112,8 +104,8 @@ class TickersPipelineStack(Stack):
         # =================================================================
         self.job_role = iam.Role(
             self,
-            "TickersJobRole",
-            role_name="petals-tickers-job-role",
+            "TrialsJobRole",
+            role_name="petals-trials-job-role",
             assumed_by=iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
         )
 
@@ -128,29 +120,26 @@ class TickersPipelineStack(Stack):
             )
         )
 
-        # Secret access
-        self.api_secret.grant_read(self.job_role)
-
         # =================================================================
         # Batch Job Definition
         # =================================================================
         self.job_definition = batch.EcsJobDefinition(
             self,
-            "TickersJobDef",
-            job_definition_name="petals-tickers-job",
+            "TrialsJobDef",
+            job_definition_name="petals-trials-job",
             container=batch.EcsFargateContainerDefinition(
                 self,
-                "TickersContainer",
+                "TrialsContainer",
                 image=ecs.ContainerImage.from_ecr_repository(self.ecr_repo, "latest"),
                 cpu=0.5,
-                memory=Size.mebibytes(1024),  # 1 GB
+                memory=Size.mebibytes(2048),  # 2 GB (larger than tickers - 84k records)
                 job_role=self.job_role,
                 logging=ecs.LogDriver.aws_logs(
-                    stream_prefix="tickers-pipeline",
+                    stream_prefix="trials-pipeline",
                     log_group=logs.LogGroup(
                         self,
-                        "TickersLogGroup",
-                        log_group_name="/petals/pipelines/tickers",
+                        "TrialsLogGroup",
+                        log_group_name="/petals/pipelines/trials",
                         retention=logs.RetentionDays.TWO_WEEKS,
                         removal_policy=RemovalPolicy.DESTROY,
                     ),
@@ -158,16 +147,12 @@ class TickersPipelineStack(Stack):
                 environment={
                     "TABLE_BUCKET_ARN": table_bucket_arn,
                     "AWS_DEFAULT_REGION": self.region,
-                    "PIPELINE": "src.pipelines.tickers.main",
+                    "PIPELINE": "src.pipelines.trials.main",
                 },
-                secrets={
-                    "MASSIVE_API_KEY": batch.Secret.from_secrets_manager(
-                        self.api_secret, "Default"
-                    ),
-                },
-                assign_public_ip=True,  # Required to reach Secrets Manager/ECR without NAT
+                # No secrets needed - ClinicalTrials.gov API is public
+                assign_public_ip=True,  # Required to reach ECR/internet without NAT
             ),
-            timeout=Duration.minutes(60),
+            timeout=Duration.minutes(120),  # Longer timeout for full extraction
             retry_attempts=1,
         )
 
@@ -180,17 +165,17 @@ class TickersPipelineStack(Stack):
             self,
             "GetPipelineState",
             table=self.state_table,
-            key={"pipeline_id": tasks.DynamoAttributeValue.from_string("tickers")},
+            key={"pipeline_id": tasks.DynamoAttributeValue.from_string("trials")},
             result_path="$.state",
         )
 
         # Task: Run Batch job
         run_batch = tasks.BatchSubmitJob(
             self,
-            "RunTickersPipeline",
+            "RunTrialsPipeline",
             job_definition_arn=self.job_definition.job_definition_arn,
             job_queue_arn=self.job_queue.job_queue_arn,
-            job_name="tickers-pipeline",
+            job_name="trials-pipeline",
             container_overrides=tasks.BatchContainerOverrides(
                 environment={
                     "LAST_RUN_TIME": sfn.JsonPath.string_at(
@@ -208,7 +193,7 @@ class TickersPipelineStack(Stack):
             "UpdatePipelineState",
             table=self.state_table,
             item={
-                "pipeline_id": tasks.DynamoAttributeValue.from_string("tickers"),
+                "pipeline_id": tasks.DynamoAttributeValue.from_string("trials"),
                 "last_run_time": tasks.DynamoAttributeValue.from_string(
                     sfn.JsonPath.string_at("$$.State.EnteredTime")
                 ),
@@ -223,7 +208,7 @@ class TickersPipelineStack(Stack):
             "RecordFailure",
             table=self.state_table,
             item={
-                "pipeline_id": tasks.DynamoAttributeValue.from_string("tickers"),
+                "pipeline_id": tasks.DynamoAttributeValue.from_string("trials"),
                 "last_status": tasks.DynamoAttributeValue.from_string("FAILED"),
                 "error": tasks.DynamoAttributeValue.from_string(
                     sfn.JsonPath.string_at("$.error.Error")
@@ -291,10 +276,10 @@ class TickersPipelineStack(Stack):
 
         self.state_machine = sfn.StateMachine(
             self,
-            "TickersPipelineStateMachine",
-            state_machine_name="petals-tickers-pipeline",
+            "TrialsPipelineStateMachine",
+            state_machine_name="petals-trials-pipeline",
             definition_body=sfn.DefinitionBody.from_chainable(definition),
-            timeout=Duration.minutes(75),
+            timeout=Duration.minutes(135),  # 15 min buffer over job timeout
             tracing_enabled=True,
         )
 
@@ -302,15 +287,15 @@ class TickersPipelineStack(Stack):
         self.state_table.grant_read_write_data(self.state_machine)
 
         # =================================================================
-        # EventBridge Schedule (daily at 6 AM UTC)
+        # EventBridge Schedule (daily at 7 AM UTC - offset from tickers)
         # =================================================================
         self.schedule_rule = events.Rule(
             self,
-            "TickersSchedule",
-            rule_name="petals-tickers-daily",
+            "TrialsSchedule",
+            rule_name="petals-trials-daily",
             schedule=events.Schedule.cron(
                 minute="0",
-                hour="6",
+                hour="7",  # 1 hour after tickers pipeline
                 month="*",
                 week_day="*",
                 year="*",
