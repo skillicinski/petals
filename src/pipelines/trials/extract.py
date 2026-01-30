@@ -102,9 +102,9 @@ def fetch_studies(
     params = [f"pageSize={page_size}", f"filter.overallStatus={status}"]
 
     if updated_since:
-        # API accepts filter.lastUpdatePostDate format: YYYY-MM-DD
+        # API uses query.term with AREA/RANGE syntax for date filtering
         date_str = updated_since.strftime("%Y-%m-%d")
-        params.append(f"filter.lastUpdatePostDate={date_str}")
+        params.append(f"query.term=AREA[LastUpdatePostDate]RANGE[{date_str},MAX]")
         print(f"Incremental mode: fetching studies updated since {date_str}")
     else:
         print(f"Full extraction mode: fetching all {status} studies")
