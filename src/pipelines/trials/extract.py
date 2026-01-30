@@ -17,6 +17,24 @@ from typing import Iterator
 BASE_URL = "https://clinicaltrials.gov/api/v2/studies"
 
 
+def _normalize_date(date_str: str | None) -> str | None:
+    """
+    Normalize dates from ClinicalTrials.gov API.
+
+    The API returns dates in mixed formats:
+    - Full dates: "2024-08-06"
+    - Year-month only: "2011-01"
+
+    We normalize year-month to first-of-month for consistent downstream analysis.
+    """
+    if not date_str:
+        return None
+    # Year-month format (YYYY-MM) → normalize to first of month
+    if len(date_str) == 7 and date_str[4] == '-':
+        return f'{date_str}-01'
+    return date_str
+
+
 def _extract_study_fields(study: dict) -> dict:
     """
     Flatten a study response into a clean record for storage.
@@ -62,9 +80,9 @@ def _extract_study_fields(study: dict) -> dict:
         "organization_name": org.get("fullName"),
         "organization_class": org.get("class"),
         "overall_status": status_module.get("overallStatus"),
-        "completion_date": completion.get("date"),
+        "completion_date": _normalize_date(completion.get("date")),
         "completion_date_type": completion.get("type"),
-        "primary_completion_date": primary_completion.get("date"),
+        "primary_completion_date": _normalize_date(primary_completion.get("date")),
         "study_type": design_module.get("studyType"),
         "enrollment_count": enrollment.get("count"),
         "enrollment_type": enrollment.get("type"),
