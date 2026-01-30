@@ -108,11 +108,35 @@ Results (1000 sponsor sample):
 
 The ~43% in medium tier contains both true positives and false positives - this is where additional verification adds value.
 
-### Open Questions
+### Alias Generation Pipeline (Proof of Concept)
 
-*Decision pending on approach for alias generation and match verification:*
+**Status:** Local proof of concept validated. Not yet deployed to cloud.
 
-- **LLM-assisted aliasing** - generate company aliases programmatically vs. manual curation
-- **LLM verification** - validate medium-confidence matches using company context
-- **Ticker enrichment** - pull additional metadata (SIC codes, industry, description) from Massive API to improve matching signals
-- **Output table design** - schema for the sponsor→ticker mapping table
+**Approach:** Use LLM to generate company name aliases from ticker_details records.
+
+**Implementation:** `src/pipelines/alias_gen/`
+- Reads companies from `reference.ticker_details`
+- Generates aliases via LLM (Ollama locally, Bedrock for cloud)
+- Outputs to JSON file (Iceberg table optional)
+
+**Local testing:**
+```bash
+# Start Ollama server
+ollama serve
+ollama pull llama3.2:3b
+
+# Run pipeline
+AWS_PROFILE=personal LLM_BACKEND=ollama LIMIT=50 \
+  python -m src.pipelines.alias_gen.main
+```
+
+**Results (50 company test):**
+- 221 aliases generated (4.4 avg per company)
+- ~2 seconds per company locally
+- Zero failures
+- Quality: Picked up historical names (e.g., "Biogen Idec"), relevant abbreviations
+
+**Open questions for production:**
+- Cloud deployment: ECS with Ollama sidecar vs Lambda with Bedrock
+- Alias validation: How to filter hallucinated aliases
+- Storage: Persist to Iceberg table or keep as lookup JSON

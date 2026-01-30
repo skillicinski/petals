@@ -21,6 +21,12 @@ dev = [
     "ruff>=0.8.0",
     "testcontainers[localstack]>=4.10.0",
 ]
+notebook = [
+    "jupyterlab>=4.0.0",
+]
+ml = [
+    "ollama>=0.4.0",
+]
 
 [tool.ruff]
 line-length = 100

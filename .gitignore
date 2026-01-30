@@ -22,3 +22,7 @@ cdk.out/
 # Local dev notes
 DEVLOG.md
 AGENTS.md
+
+# Local data/output
+data/
+notebooks/
