@@ -203,17 +203,22 @@ class TrialsPipelineStack(Stack):
         )
 
         # Task: Record failure state (for Spot interruption, OOM, etc.)
-        record_failure = tasks.DynamoPutItem(
+        # Uses UpdateItem to preserve last_run_time from previous successful run
+        record_failure = tasks.DynamoUpdateItem(
             self,
             "RecordFailure",
             table=self.state_table,
-            item={
+            key={
                 "pipeline_id": tasks.DynamoAttributeValue.from_string("trials"),
-                "last_status": tasks.DynamoAttributeValue.from_string("FAILED"),
-                "error": tasks.DynamoAttributeValue.from_string(
+            },
+            update_expression="SET last_status = :status, #err = :error, cause = :cause",
+            expression_attribute_names={"#err": "error"},
+            expression_attribute_values={
+                ":status": tasks.DynamoAttributeValue.from_string("FAILED"),
+                ":error": tasks.DynamoAttributeValue.from_string(
                     sfn.JsonPath.string_at("$.error.Error")
                 ),
-                "cause": tasks.DynamoAttributeValue.from_string(
+                ":cause": tasks.DynamoAttributeValue.from_string(
                     sfn.JsonPath.string_at("$.error.Cause")
                 ),
             },
