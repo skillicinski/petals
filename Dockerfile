@@ -37,4 +37,5 @@ ENV PYTHONUNBUFFERED=1
 # Examples:
 #   src.pipelines.tickers.main
 #   src.pipelines.trials.main
+#   src.pipelines.ticker_details.main
 ENTRYPOINT ["sh", "-c", "python -u -m ${PIPELINE:?PIPELINE env var must be set}"]

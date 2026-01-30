@@ -20,6 +20,12 @@ flowchart TB
         BATCH1[AWS Batch<br/>Fargate Spot]
     end
 
+    subgraph TickerDetailsPipeline["Ticker Details Pipeline (petals-ticker-details-pipeline)"]
+        EB3[EventBridge<br/>Daily 7 AM UTC]
+        SFN3[Step Functions]
+        BATCH3[AWS Batch<br/>Fargate Spot]
+    end
+
     subgraph TrialsPipeline["Trials Pipeline (petals-trials-pipeline)"]
         EB2[EventBridge<br/>Daily 7 AM UTC]
         SFN2[Step Functions]
@@ -49,6 +55,16 @@ flowchart TB
     ECR --> BATCH1
     BATCH1 -->|upsert| NS_REF
 
+    %% Ticker details pipeline flow
+    NS_REF -->|read pharma tickers| BATCH3
+    API --> BATCH3
+    SM --> BATCH3
+    EB3 --> SFN3
+    SFN3 <-->|state| DDB
+    SFN3 --> BATCH3
+    ECR --> BATCH3
+    BATCH3 -->|upsert| NS_REF
+
     %% Trials pipeline flow
     CTGOV --> BATCH2
     EB2 --> SFN2
@@ -64,10 +80,15 @@ flowchart TB
 
 ## Data Flow
 
-### Tickers Pipeline (daily)
+### Tickers Pipeline (daily, 6 AM UTC)
 EventBridge triggers Step Functions → reads last run time from DynamoDB → submits Batch job → container fetches from Massive API (incremental) → upserts to S3 Tables `reference.tickers` → records new timestamp
 
-### Trials Pipeline (daily)
+### Ticker Details Pipeline (daily, 7 AM UTC)
+EventBridge triggers Step Functions → reads last run time from DynamoDB → submits Batch job → reads pharma-like tickers from `reference.tickers` → fetches detailed info from Massive API (SIC codes, descriptions, etc.) → upserts to S3 Tables `reference.ticker_details` → records new timestamp
+
+*Note: Initial backfill takes ~12 hours due to API rate limiting (5 calls/min). Incremental runs are much faster.*
+
+### Trials Pipeline (daily, 7 AM UTC)
 EventBridge triggers Step Functions → reads last run time from DynamoDB → submits Batch job → container fetches COMPLETED studies from ClinicalTrials.gov (filtered to INDUSTRY sponsors) → upserts to S3 Tables `clinical.trials` → records new timestamp
 
 ### Query
@@ -78,5 +99,6 @@ Athena queries S3 Tables via federated catalog (`s3tablescatalog`)
 | Namespace | Table | Description |
 |-----------|-------|-------------|
 | `reference` | `tickers` | Stock/ETF ticker reference data from Massive API |
+| `reference` | `ticker_details` | Enriched ticker details (SIC codes, descriptions) for pharma/biotech tickers |
 | `clinical` | `trials` | Completed clinical trials from ClinicalTrials.gov (INDUSTRY sponsors) |
 
