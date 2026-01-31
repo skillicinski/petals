@@ -142,8 +142,18 @@ def score_candidates(candidates_df: pl.DataFrame) -> pl.DataFrame:
         score_result = score_candidate(sponsor_aliases, ticker_aliases)
         scores.append(score_result)
 
-    # Build score columns
-    scores_df = pl.DataFrame(scores)
+    # Build score columns with explicit schema to handle None values
+    # (Polars infers null type from early rows, fails on later "machine" strings)
+    scores_df = pl.DataFrame(
+        scores,
+        schema={
+            'confidence': pl.Float64,
+            'match_reason': pl.Utf8,
+            'status': pl.Utf8,
+            'approved_by': pl.Utf8,
+            'rejected_by': pl.Utf8,
+        },
+    )
 
     # Concatenate horizontally
     result = pl.concat([candidates_df, scores_df], how='horizontal')

@@ -1,8 +1,10 @@
 """Tests for entity matching pipeline."""
 
+import polars as pl
 import pytest
 
 from src.pipelines.entity_match.aliases import parse_aliases_response
+from src.pipelines.entity_match.scoring import score_candidate, score_candidates
 
 
 class TestParseAliasesResponse:
@@ -56,6 +58,112 @@ class TestParseAliasesResponse:
         response = '[GSK, Glaxo'  # Missing quotes and bracket
         result = parse_aliases_response(response)
         assert result == []
+
+
+class TestScoring:
+    """Tests for candidate scoring and schema consistency."""
+
+    def test_score_candidate_high_confidence_approved(self):
+        """High confidence match should be auto-approved."""
+        # Identical aliases = high confidence
+        result = score_candidate(
+            sponsor_aliases=['pfizer', 'pfe', 'pfizer inc'],
+            ticker_aliases=['pfizer', 'pfe', 'pfizer inc'],
+        )
+        assert result['confidence'] >= 0.9
+        assert result['status'] == 'approved'
+        assert result['approved_by'] == 'machine'
+        assert result['rejected_by'] is None
+
+    def test_score_candidate_low_confidence_rejected(self):
+        """Low confidence match should be auto-rejected."""
+        # No overlap = low confidence
+        result = score_candidate(
+            sponsor_aliases=['acme corp', 'acme'],
+            ticker_aliases=['globex', 'gx'],
+        )
+        assert result['confidence'] < 0.5
+        assert result['status'] == 'rejected'
+        assert result['approved_by'] is None
+        assert result['rejected_by'] == 'machine'
+
+    def test_score_candidate_medium_confidence_pending(self):
+        """Medium confidence match should be pending review."""
+        # Partial overlap = medium confidence
+        result = score_candidate(
+            sponsor_aliases=['pharma corp', 'pharma', 'pc'],
+            ticker_aliases=['pharma inc', 'pharma', 'pi'],
+        )
+        assert 0.5 <= result['confidence'] < 0.9
+        assert result['status'] == 'pending'
+        assert result['approved_by'] is None
+        assert result['rejected_by'] is None
+
+    def test_score_candidates_mixed_statuses_schema(self):
+        """score_candidates handles mixed statuses without schema errors.
+
+        This is the critical test - Polars schema inference failed when
+        early rows had None for approved_by/rejected_by and later rows
+        had 'machine' strings. The DataFrame creation must use explicit schema.
+        """
+        # Create test DataFrame with candidates that will produce all status types
+        candidates_df = pl.DataFrame({
+            'sponsor_name': ['A', 'B', 'C', 'D'],
+            'ticker': ['T1', 'T2', 'T3', 'T4'],
+            # High overlap → approved
+            'sponsor_aliases': [
+                ['exact match', 'em'],
+                ['partial', 'match'],
+                ['no', 'overlap'],
+                ['another', 'exact', 'test'],
+            ],
+            'ticker_aliases': [
+                ['exact match', 'em'],  # Will be approved (high confidence)
+                ['partial', 'different'],  # Will be pending (medium confidence)
+                ['completely', 'different'],  # Will be rejected (low confidence)
+                ['another', 'exact', 'test'],  # Will be approved
+            ],
+        })
+
+        # This should NOT raise a schema error
+        result = score_candidates(candidates_df)
+
+        # Verify schema
+        assert 'confidence' in result.columns
+        assert 'status' in result.columns
+        assert 'approved_by' in result.columns
+        assert 'rejected_by' in result.columns
+
+        # Verify we got mixed statuses
+        statuses = result['status'].to_list()
+        assert 'approved' in statuses or 'rejected' in statuses  # At least one decision
+        assert len(result) == 4
+
+    def test_score_candidates_empty_input(self):
+        """Handle empty candidate DataFrame gracefully."""
+        empty_df = pl.DataFrame({
+            'sponsor_name': [],
+            'ticker': [],
+            'sponsor_aliases': [],
+            'ticker_aliases': [],
+        })
+
+        result = score_candidates(empty_df)
+        assert len(result) == 0
+
+    def test_score_candidates_all_rejected_schema(self):
+        """Schema works when all rows are rejected (all have rejected_by='machine')."""
+        # All low-confidence matches
+        candidates_df = pl.DataFrame({
+            'sponsor_name': ['A', 'B', 'C'],
+            'ticker': ['T1', 'T2', 'T3'],
+            'sponsor_aliases': [['x'], ['y'], ['z']],
+            'ticker_aliases': [['a'], ['b'], ['c']],
+        })
+
+        result = score_candidates(candidates_df)
+        assert all(s == 'rejected' for s in result['status'].to_list())
+        assert all(r == 'machine' for r in result['rejected_by'].to_list())
 
 
 class TestGenerateAliases:
