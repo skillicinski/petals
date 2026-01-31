@@ -30,8 +30,8 @@ def _normalize_date(date_str: str | None) -> str | None:
     if not date_str:
         return None
     # Year-month format (YYYY-MM) → normalize to first of month
-    if len(date_str) == 7 and date_str[4] == '-':
-        return f'{date_str}-01'
+    if len(date_str) == 7 and date_str[4] == "-":
+        return f"{date_str}-01"
     return date_str
 
 

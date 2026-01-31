@@ -90,9 +90,7 @@ def get_tickers_to_enrich(
     log(f"[main] Total tickers in table: {len(tickers_df):,}")
 
     # Filter to US stocks only (includes active + inactive for historical trial matching)
-    tickers_df = tickers_df.filter(
-        (pl.col("market") == "stocks") & (pl.col("locale") == "us")
-    )
+    tickers_df = tickers_df.filter((pl.col("market") == "stocks") & (pl.col("locale") == "us"))
     log(f"[main] US stock tickers: {len(tickers_df):,}")
 
     # Compare against existing ticker_details to skip tickers that haven't changed
@@ -100,16 +98,12 @@ def get_tickers_to_enrich(
         log("[main] Loading existing ticker_details for change detection...")
         details_table = catalog.load_table("reference.ticker_details")
         details_df = pl.from_arrow(
-            details_table.scan(
-                selected_fields=("ticker", "market", "last_fetched_utc")
-            ).to_arrow()
+            details_table.scan(selected_fields=("ticker", "market", "last_fetched_utc")).to_arrow()
         )
         log(f"[main] Existing ticker_details records: {len(details_df):,}")
 
         # Left join tickers with details
-        tickers_df = tickers_df.join(
-            details_df, on=["ticker", "market"], how="left"
-        )
+        tickers_df = tickers_df.join(details_df, on=["ticker", "market"], how="left")
 
         # Keep tickers where:
         # - No details exist (last_fetched_utc is null), OR

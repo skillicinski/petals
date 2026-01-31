@@ -20,11 +20,12 @@ from typing import Literal
 
 import polars as pl
 
-LLMBackend = Literal['ollama', 'bedrock']
+LLMBackend = Literal["ollama", "bedrock"]
 
 
 class OllamaNotAvailableError(Exception):
     """Raised when Ollama server is not running."""
+
     pass
 
 
@@ -32,9 +33,10 @@ def check_ollama_available() -> bool:
     """Check if Ollama server is running and has required model."""
     try:
         import ollama
+
         models = ollama.list()
         model_names = [m.model for m in models.models]
-        required = os.environ.get('OLLAMA_MODEL', 'llama3.2:3b')
+        required = os.environ.get("OLLAMA_MODEL", "llama3.2:3b")
         # Check for exact match or partial (llama3.2:3b matches llama3.2:3b-...)
         return any(required in name for name in model_names)
     except Exception:
@@ -46,12 +48,12 @@ def parse_aliases_response(text: str) -> list[str]:
     text = text.strip()
 
     # Extract JSON array if embedded in other text
-    if '[' not in text:
+    if "[" not in text:
         return []
 
     try:
-        start = text.index('[')
-        end = text.rindex(']') + 1
+        start = text.index("[")
+        end = text.rindex("]") + 1
         text = text[start:end]
     except ValueError:
         # No closing bracket found
@@ -89,13 +91,13 @@ def truncate_description(description: str | None, max_chars: int = 200) -> str |
         return None
     if len(description) <= max_chars:
         return description
-    return description[:max_chars].rsplit(' ', 1)[0] + '...'
+    return description[:max_chars].rsplit(" ", 1)[0] + "..."
 
 
 def generate_aliases_ollama(
     company_name: str,
     description: str | None = None,
-    model: str = 'llama3.2:3b',
+    model: str = "llama3.2:3b",
     timeout: float = 30.0,
 ) -> list[str]:
     """Generate aliases using local Ollama.
@@ -124,36 +126,36 @@ def generate_aliases_ollama(
     prompt = f'''List aliases for "{company_name}" as a valid JSON array of strings only.
 '''
     if description:
-        prompt += f'Context: {description}\n'
+        prompt += f"Context: {description}\n"
 
-    prompt += '''Return ONLY the JSON array, no explanations. Example: ["Alias1", "Alias2"]
-'''
+    prompt += """Return ONLY the JSON array, no explanations. Example: ["Alias1", "Alias2"]
+"""
 
     try:
         response = ollama.generate(
             model=model,
             prompt=prompt,
             options={
-                'temperature': 0.1,
-                'num_predict': 128,  # Limit output tokens
+                "temperature": 0.1,
+                "num_predict": 128,  # Limit output tokens
             },
-            keep_alive='5m',  # Keep model loaded between calls
+            keep_alive="5m",  # Keep model loaded between calls
         )
     except ResponseError as e:
         raise RuntimeError(f"Ollama error: {e}")
 
-    return parse_aliases_response(response['response'])
+    return parse_aliases_response(response["response"])
 
 
 def generate_aliases_bedrock(
     company_name: str,
     description: str | None = None,
-    model_id: str = 'meta.llama3-8b-instruct-v1:0'
+    model_id: str = "meta.llama3-8b-instruct-v1:0",
 ) -> list[str]:
     """Generate aliases using AWS Bedrock."""
     import boto3
 
-    bedrock = boto3.client('bedrock-runtime')
+    bedrock = boto3.client("bedrock-runtime")
 
     # Truncate long descriptions
     description = truncate_description(description)
@@ -161,33 +163,30 @@ def generate_aliases_bedrock(
     prompt = f'''List aliases for "{company_name}" as a valid JSON array of strings only.
 '''
     if description:
-        prompt += f'Context: {description}\n'
+        prompt += f"Context: {description}\n"
 
-    prompt += '''Return ONLY the JSON array, no explanations. Example: ["Alias1", "Alias2"]
-'''
+    prompt += """Return ONLY the JSON array, no explanations. Example: ["Alias1", "Alias2"]
+"""
 
     # Llama 3 format
-    body = json.dumps({
-        'prompt': f'<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n{prompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n',
-        'max_gen_len': 128,  # Limit output tokens
-        'temperature': 0.1,
-    })
-
-    response = bedrock.invoke_model(
-        modelId=model_id,
-        body=body,
-        contentType='application/json',
-        accept='application/json'
+    body = json.dumps(
+        {
+            "prompt": f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n{prompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n",
+            "max_gen_len": 128,  # Limit output tokens
+            "temperature": 0.1,
+        }
     )
 
-    result = json.loads(response['body'].read())
-    return parse_aliases_response(result.get('generation', ''))
+    response = bedrock.invoke_model(
+        modelId=model_id, body=body, contentType="application/json", accept="application/json"
+    )
+
+    result = json.loads(response["body"].read())
+    return parse_aliases_response(result.get("generation", ""))
 
 
 def generate_aliases(
-    company_name: str,
-    description: str | None = None,
-    backend: LLMBackend = 'ollama'
+    company_name: str, description: str | None = None, backend: LLMBackend = "ollama"
 ) -> list[str]:
     """Generate aliases using configured backend.
 
@@ -197,16 +196,16 @@ def generate_aliases(
 
     Set LLM_BACKEND env var to override.
     """
-    backend = os.environ.get('LLM_BACKEND', backend)
+    backend = os.environ.get("LLM_BACKEND", backend)
 
-    if backend == 'ollama':
-        model = os.environ.get('OLLAMA_MODEL', 'llama3.2:3b')
+    if backend == "ollama":
+        model = os.environ.get("OLLAMA_MODEL", "llama3.2:3b")
         return generate_aliases_ollama(company_name, description, model)
-    elif backend == 'bedrock':
-        model = os.environ.get('BEDROCK_MODEL', 'meta.llama3-8b-instruct-v1:0')
+    elif backend == "bedrock":
+        model = os.environ.get("BEDROCK_MODEL", "meta.llama3-8b-instruct-v1:0")
         return generate_aliases_bedrock(company_name, description, model)
     else:
-        raise ValueError(f'Unknown LLM backend: {backend}')
+        raise ValueError(f"Unknown LLM backend: {backend}")
 
 
 def normalize_alias(alias: str) -> str:
@@ -223,7 +222,7 @@ def enrich_with_aliases(
     df: pl.DataFrame,
     name_col: str,
     description_col: str | None = None,
-    backend: LLMBackend = 'ollama',
+    backend: LLMBackend = "ollama",
     progress_interval: int = 10,
 ) -> pl.DataFrame:
     """Enrich DataFrame with aliases generated via LLM.
@@ -271,9 +270,11 @@ def enrich_with_aliases(
         if (processed + errors) % progress_interval == 0:
             elapsed = time.time() - start_time
             rate = (processed + errors) / elapsed if elapsed > 0 else 0
-            print(f'[aliases] Progress: {processed + errors}/{len(df)} ({rate:.1f}/s)')
+            print(f"[aliases] Progress: {processed + errors}/{len(df)} ({rate:.1f}/s)")
 
     elapsed = time.time() - start_time
-    print(f'[aliases] Generated aliases for {processed} entities ({errors} errors) in {elapsed:.1f}s')
+    print(
+        f"[aliases] Generated aliases for {processed} entities ({errors} errors) in {elapsed:.1f}s"
+    )
 
-    return df.with_columns(pl.Series('aliases', aliases_list))
+    return df.with_columns(pl.Series("aliases", aliases_list))

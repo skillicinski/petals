@@ -14,20 +14,20 @@ from pyiceberg.catalog import load_catalog
 def get_catalog():
     """Load PyIceberg catalog for S3 Tables."""
     bucket_arn = os.environ.get(
-        'TABLE_BUCKET_ARN',
-        'arn:aws:s3tables:us-east-1:620117234001:bucket/petals-tables-620117234001'
+        "TABLE_BUCKET_ARN",
+        "arn:aws:s3tables:us-east-1:620117234001:bucket/petals-tables-620117234001",
     )
-    region = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
+    region = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
     return load_catalog(
-        's3tables',
-        type='rest',
-        uri=f'https://s3tables.{region}.amazonaws.com/iceberg',
+        "s3tables",
+        type="rest",
+        uri=f"https://s3tables.{region}.amazonaws.com/iceberg",
         warehouse=bucket_arn,
         **{
-            'rest.sigv4-enabled': 'true',
-            'rest.signing-region': region,
-            'rest.signing-name': 's3tables',
-        }
+            "rest.sigv4-enabled": "true",
+            "rest.signing-region": region,
+            "rest.signing-name": "s3tables",
+        },
     )
 
 
@@ -37,20 +37,17 @@ def fetch_sponsors(limit: int | None = None) -> pl.DataFrame:
     Returns DataFrame with columns: sponsor_name
     """
     catalog = get_catalog()
-    table = catalog.load_table('clinical.trials')
+    table = catalog.load_table("clinical.trials")
 
-    scan = table.scan(
-        selected_fields=['sponsor_name'],
-        row_filter='sponsor_name IS NOT NULL'
-    )
+    scan = table.scan(selected_fields=["sponsor_name"], row_filter="sponsor_name IS NOT NULL")
     arrow_table = scan.to_arrow()
 
-    df = pl.from_arrow(arrow_table).unique().sort('sponsor_name')
+    df = pl.from_arrow(arrow_table).unique().sort("sponsor_name")
 
     if limit:
         df = df.head(limit)
 
-    print(f'[extract] Fetched {len(df)} distinct sponsors from clinical.trials')
+    print(f"[extract] Fetched {len(df)} distinct sponsors from clinical.trials")
     return df
 
 
@@ -60,18 +57,17 @@ def fetch_tickers(limit: int | None = None) -> pl.DataFrame:
     Returns DataFrame with columns: ticker, market, name, description
     """
     catalog = get_catalog()
-    table = catalog.load_table('reference.ticker_details')
+    table = catalog.load_table("reference.ticker_details")
 
     scan = table.scan(
-        selected_fields=['ticker', 'market', 'name', 'description'],
-        row_filter='name IS NOT NULL'
+        selected_fields=["ticker", "market", "name", "description"], row_filter="name IS NOT NULL"
     )
     arrow_table = scan.to_arrow()
 
-    df = pl.from_arrow(arrow_table).sort('name')
+    df = pl.from_arrow(arrow_table).sort("name")
 
     if limit:
         df = df.head(limit)
 
-    print(f'[extract] Fetched {len(df)} tickers from ticker_details')
+    print(f"[extract] Fetched {len(df)} tickers from ticker_details")
     return df

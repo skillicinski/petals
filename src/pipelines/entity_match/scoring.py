@@ -35,11 +35,11 @@ def best_fuzzy_match(aliases_a: list[str], aliases_b: list[str]) -> tuple[float,
         (score, best_a, best_b) - best match score and the matching aliases
     """
     if not aliases_a or not aliases_b:
-        return 0.0, '', ''
+        return 0.0, "", ""
 
     best_score = 0.0
-    best_a = ''
-    best_b = ''
+    best_a = ""
+    best_b = ""
 
     for a in aliases_a:
         for b in aliases_b:
@@ -81,9 +81,7 @@ def score_candidate(
     jaccard = jaccard_similarity(sponsor_set, ticker_set)
 
     # Find best fuzzy match
-    fuzzy_score, fuzzy_a, fuzzy_b = best_fuzzy_match(
-        list(sponsor_set), list(ticker_set)
-    )
+    fuzzy_score, fuzzy_a, fuzzy_b = best_fuzzy_match(list(sponsor_set), list(ticker_set))
 
     # Find exact overlaps
     overlaps = find_overlapping_aliases(sponsor_aliases, ticker_aliases)
@@ -97,21 +95,21 @@ def score_candidate(
     # Build match reason
     reasons = []
     if overlaps:
-        reasons.append(f'exact: {", ".join(overlaps[:3])}')
+        reasons.append(f"exact: {', '.join(overlaps[:3])}")
     if fuzzy_score > 0.7:
         reasons.append(f'fuzzy: "{fuzzy_a}" ~ "{fuzzy_b}" ({fuzzy_score:.0%})')
 
-    match_reason = '; '.join(reasons) if reasons else 'token overlap only'
+    match_reason = "; ".join(reasons) if reasons else "token overlap only"
 
     # Determine status and auto-decisions based on confidence
     if confidence >= CONFIDENCE_AUTO_APPROVE:
         status = STATUS_APPROVED
-        approved_by = 'machine'
+        approved_by = "machine"
         rejected_by = None
     elif confidence < CONFIDENCE_AUTO_REJECT:
         status = STATUS_REJECTED
         approved_by = None
-        rejected_by = 'machine'
+        rejected_by = "machine"
     else:
         # In review band - pending human review
         status = STATUS_PENDING
@@ -119,11 +117,11 @@ def score_candidate(
         rejected_by = None
 
     return {
-        'confidence': round(confidence, 3),
-        'match_reason': match_reason,
-        'status': status,
-        'approved_by': approved_by,
-        'rejected_by': rejected_by,
+        "confidence": round(confidence, 3),
+        "match_reason": match_reason,
+        "status": status,
+        "approved_by": approved_by,
+        "rejected_by": rejected_by,
     }
 
 
@@ -136,8 +134,8 @@ def score_candidates(candidates_df: pl.DataFrame) -> pl.DataFrame:
     scores = []
 
     for row in candidates_df.iter_rows(named=True):
-        sponsor_aliases = row.get('sponsor_aliases', [])
-        ticker_aliases = row.get('ticker_aliases', [])
+        sponsor_aliases = row.get("sponsor_aliases", [])
+        ticker_aliases = row.get("ticker_aliases", [])
 
         score_result = score_candidate(sponsor_aliases, ticker_aliases)
         scores.append(score_result)
@@ -147,25 +145,27 @@ def score_candidates(candidates_df: pl.DataFrame) -> pl.DataFrame:
     scores_df = pl.DataFrame(
         scores,
         schema={
-            'confidence': pl.Float64,
-            'match_reason': pl.Utf8,
-            'status': pl.Utf8,
-            'approved_by': pl.Utf8,
-            'rejected_by': pl.Utf8,
+            "confidence": pl.Float64,
+            "match_reason": pl.Utf8,
+            "status": pl.Utf8,
+            "approved_by": pl.Utf8,
+            "rejected_by": pl.Utf8,
         },
     )
 
     # Concatenate horizontally
-    result = pl.concat([candidates_df, scores_df], how='horizontal')
+    result = pl.concat([candidates_df, scores_df], how="horizontal")
 
     # Sort by confidence descending
-    result = result.sort('confidence', descending=True)
+    result = result.sort("confidence", descending=True)
 
     # Stats
-    auto_approved = (result['status'] == STATUS_APPROVED).sum()
-    pending = (result['status'] == STATUS_PENDING).sum()
-    auto_rejected = (result['status'] == STATUS_REJECTED).sum()
-    print(f'[scoring] Scored {len(result)} candidates: '
-          f'{auto_approved} auto-approved, {pending} pending review, {auto_rejected} auto-rejected')
+    auto_approved = (result["status"] == STATUS_APPROVED).sum()
+    pending = (result["status"] == STATUS_PENDING).sum()
+    auto_rejected = (result["status"] == STATUS_REJECTED).sum()
+    print(
+        f"[scoring] Scored {len(result)} candidates: "
+        f"{auto_approved} auto-approved, {pending} pending review, {auto_rejected} auto-rejected"
+    )
 
     return result

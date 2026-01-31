@@ -6,8 +6,8 @@ from .tickers import TickersPipelineStack
 from .trials import TrialsPipelineStack
 
 __all__ = [
-    'EntityMatchPipelineStack',
-    'TickerDetailsPipelineStack',
-    'TickersPipelineStack',
-    'TrialsPipelineStack',
+    "EntityMatchPipelineStack",
+    "TickerDetailsPipelineStack",
+    "TickersPipelineStack",
+    "TrialsPipelineStack",
 ]

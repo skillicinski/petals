@@ -199,13 +199,13 @@ class SharedStack(Stack):
         # recovery if final write fails. Also useful for debugging.
         self.artifacts_bucket = s3.Bucket(
             self,
-            'ArtifactsBucket',
-            bucket_name=f'petals-artifacts-{self.account}',
+            "ArtifactsBucket",
+            bucket_name=f"petals-artifacts-{self.account}",
             removal_policy=RemovalPolicy.RETAIN,
             lifecycle_rules=[
                 s3.LifecycleRule(
-                    id='cleanup-old-recovery-files',
-                    prefix='recovery/',
+                    id="cleanup-old-recovery-files",
+                    prefix="recovery/",
                     expiration=Duration.days(30),
                 ),
             ],
