@@ -7,20 +7,20 @@ from Massive API, and loads to reference.ticker_details table.
 Filters to US stock tickers only. Industry filtering (e.g., pharma/biotech)
 is handled downstream in entity_match using SIC codes.
 
-Incremental Mode:
-- Only fetches details for tickers updated since last run
-- Uses last_updated_utc from tickers table to determine freshness
+Change Detection:
+- Compares last_updated_utc (tickers) vs last_fetched_utc (ticker_details)
+- Only fetches details for tickers that are new or have been updated
+- No separate "incremental" mode needed - always efficient
 
 Rate Limiting:
 - Respects Massive free tier limit (5 calls/min)
 - Initial backfill for ~15,000 US stock tickers takes ~54 hours
-- Incremental runs typically complete in minutes
+- Subsequent runs only fetch changed tickers (typically minutes)
 """
 
 import faulthandler
 import os
 import sys
-from datetime import datetime
 
 import polars as pl
 import psutil
@@ -65,18 +65,19 @@ def get_catalog(table_bucket_arn: str, region: str = "us-east-1"):
 def get_tickers_to_enrich(
     table_bucket_arn: str,
     region: str,
-    updated_since: datetime | None = None,
 ) -> list[tuple[str, str]]:
     """
     Get list of tickers to enrich from reference.tickers table.
 
-    Filters to US stock tickers only. Industry filtering (pharma/biotech)
-    is handled downstream using SIC codes from ticker_details.
+    Filters to US stock tickers only. Only returns tickers that:
+    - Don't exist in ticker_details yet, OR
+    - Have been updated since their details were last fetched
+
+    Industry filtering (pharma/biotech) is handled downstream using SIC codes.
 
     Args:
         table_bucket_arn: S3 Table Bucket ARN
         region: AWS region
-        updated_since: Only include tickers updated after this time
 
     Returns:
         List of (ticker, market) tuples
@@ -94,11 +95,32 @@ def get_tickers_to_enrich(
     )
     log(f"[main] US stock tickers: {len(tickers_df):,}")
 
-    # Filter by last_updated_utc if incremental
-    if updated_since:
-        updated_since_str = updated_since.isoformat()
-        tickers_df = tickers_df.filter(pl.col("last_updated_utc") > updated_since_str)
-        log(f"[main] Tickers updated since {updated_since_str}: {len(tickers_df):,}")
+    # Compare against existing ticker_details to skip tickers that haven't changed
+    if table_exists(table_bucket_arn, region=region):
+        log("[main] Loading existing ticker_details for change detection...")
+        details_table = catalog.load_table("reference.ticker_details")
+        details_df = pl.from_arrow(
+            details_table.scan(
+                selected_fields=("ticker", "market", "last_fetched_utc")
+            ).to_arrow()
+        )
+        log(f"[main] Existing ticker_details records: {len(details_df):,}")
+
+        # Left join tickers with details
+        tickers_df = tickers_df.join(
+            details_df, on=["ticker", "market"], how="left"
+        )
+
+        # Keep tickers where:
+        # - No details exist (last_fetched_utc is null), OR
+        # - Ticker updated after details were fetched
+        before_count = len(tickers_df)
+        tickers_df = tickers_df.filter(
+            pl.col("last_fetched_utc").is_null()
+            | (pl.col("last_updated_utc") > pl.col("last_fetched_utc"))
+        )
+        skipped = before_count - len(tickers_df)
+        log(f"[main] Skipping {skipped:,} tickers with up-to-date details")
 
     # Extract (ticker, market) tuples
     result = [
@@ -114,20 +136,21 @@ def run(
     api_key: str | None = None,
     table_bucket_arn: str | None = None,
     region: str = "us-east-1",
-    force_full: bool = False,
-    last_run_time: str | None = None,
     rate_limit_delay: float = 13.0,
     load_batch_size: int = 10,  # Small batches for frequent writes
+    **_kwargs,  # Accept but ignore force_full, last_run_time for backwards compat
 ) -> dict:
     """
     Run the ticker details enrichment pipeline.
+
+    Automatically determines which tickers need enrichment by comparing
+    last_updated_utc (from tickers table) against last_fetched_utc (from
+    ticker_details table). Only fetches details for new or updated tickers.
 
     Args:
         api_key: Massive API key (or set MASSIVE_API_KEY env var)
         table_bucket_arn: S3 Table Bucket ARN (or set TABLE_BUCKET_ARN env var)
         region: AWS region
-        force_full: Force full extraction even if we have data
-        last_run_time: ISO timestamp from last pipeline run
         rate_limit_delay: Seconds between API calls (13s = under 5/min limit)
         load_batch_size: How often to flush to S3 Tables
 
@@ -142,37 +165,17 @@ def run(
     if not table_bucket_arn:
         raise ValueError("TABLE_BUCKET_ARN required")
 
-    if not force_full:
-        force_full = os.environ.get("FORCE_FULL", "").lower() in ("1", "true")
-
-    last_run_time = last_run_time or os.environ.get("LAST_RUN_TIME", "").strip()
-
     # Allow overriding rate limit delay via env var
     rate_limit_delay = float(os.environ.get("RATE_LIMIT_DELAY", rate_limit_delay))
 
     log("[main] Pipeline starting")
-    log(f"[main] force_full={force_full}, last_run_time={last_run_time or '(not set)'}")
     log(f"[main] rate_limit_delay={rate_limit_delay}s")
     log_memory("startup")
 
-    # Determine incremental window
-    updated_since = None
-    if not force_full:
-        log("[main] Checking for existing table...")
-        if table_exists(table_bucket_arn, region=region):
-            if last_run_time:
-                updated_since = datetime.fromisoformat(last_run_time.replace("Z", "+00:00"))
-                log(f"[main] Incremental mode (since: {updated_since.isoformat()})")
-            else:
-                log("[main] No last_run_time, will fetch all US stock tickers")
-        else:
-            log("[main] Table does not exist, full extraction mode")
-
-    # Get tickers to enrich
+    # Get tickers to enrich (automatically skips tickers with up-to-date details)
     tickers = get_tickers_to_enrich(
         table_bucket_arn=table_bucket_arn,
         region=region,
-        updated_since=updated_since,
     )
 
     if len(tickers) == 0:
