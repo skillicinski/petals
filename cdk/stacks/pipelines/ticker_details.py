@@ -4,11 +4,16 @@ CDK stack for the ticker details enrichment pipeline.
 Components:
 - Batch compute environment (Fargate On-Demand for reliability)
 - Batch job queue and job definition
-- Step Functions state machine for orchestration
+- Step Functions state machine for orchestration (with DynamoDB lock)
 - EventBridge rule for daily scheduling (1 hour after tickers pipeline)
 
-Note: This pipeline has a long runtime for initial backfill (~8 hours)
-due to Massive API rate limiting. Incremental runs are much faster.
+Concurrency Control:
+- Uses a DynamoDB 'running' flag to prevent concurrent executions
+- If an execution is already running, new executions skip gracefully
+- Lock is released on both success and failure
+
+Note: Initial backfill for ~35k US stock tickers takes ~123 hours due to
+API rate limiting. Subsequent runs only process new/changed tickers.
 """
 
 from aws_cdk import (
@@ -170,15 +175,16 @@ class TickerDetailsPipelineStack(Stack):
                 },
                 assign_public_ip=True,
             ),
-            timeout=Duration.hours(16),  # Long timeout for initial backfill
+            timeout=Duration.days(6),  # ~144 hours for full US stock backfill
             retry_attempts=1,
         )
 
         # =================================================================
         # Step Functions State Machine
+        # Uses DynamoDB lock to prevent concurrent executions
         # =================================================================
 
-        # Task: Read last run time from DynamoDB
+        # Task: Read pipeline state (includes running lock)
         get_state = tasks.DynamoGetItem(
             self,
             "GetPipelineState",
@@ -187,52 +193,63 @@ class TickerDetailsPipelineStack(Stack):
             result_path="$.state",
         )
 
-        # Task: Run Batch job
+        # Skip if already running
+        skip_already_running = sfn.Succeed(
+            self,
+            "SkipAlreadyRunning",
+            comment="Another execution is already running - skipping",
+        )
+
+        # Task: Acquire lock (set running=true)
+        acquire_lock = tasks.DynamoUpdateItem(
+            self,
+            "AcquireLock",
+            table=self.state_table,
+            key={"pipeline_id": tasks.DynamoAttributeValue.from_string("ticker_details")},
+            update_expression="SET running = :running",
+            expression_attribute_values={
+                ":running": tasks.DynamoAttributeValue.from_boolean(True),
+            },
+            result_path="$.lock_result",
+        )
+
+        # Task: Run Batch job (no more FORCE_FULL/LAST_RUN_TIME - handled in code)
         run_batch = tasks.BatchSubmitJob(
             self,
             "RunTickerDetailsPipeline",
             job_definition_arn=self.job_definition.job_definition_arn,
             job_queue_arn=self.job_queue.job_queue_arn,
             job_name="ticker-details-pipeline",
-            container_overrides=tasks.BatchContainerOverrides(
-                environment={
-                    "LAST_RUN_TIME": sfn.JsonPath.string_at(
-                        "States.Format('{}', $.state.Item.last_run_time.S)"
-                    ),
-                    "FORCE_FULL": sfn.JsonPath.string_at(
-                        "States.Format('{}', $.force_full)"
-                    ),
-                },
-            ),
             result_path="$.batch_result",
         )
 
-        # Task: Update state with new run time (success)
-        update_state = tasks.DynamoPutItem(
+        # Task: Release lock and update state (success)
+        release_lock_success = tasks.DynamoUpdateItem(
             self,
-            "UpdatePipelineState",
+            "ReleaseLockSuccess",
             table=self.state_table,
-            item={
-                "pipeline_id": tasks.DynamoAttributeValue.from_string("ticker_details"),
-                "last_run_time": tasks.DynamoAttributeValue.from_string(
+            key={"pipeline_id": tasks.DynamoAttributeValue.from_string("ticker_details")},
+            update_expression="SET running = :running, last_run_time = :time, last_status = :status",
+            expression_attribute_values={
+                ":running": tasks.DynamoAttributeValue.from_boolean(False),
+                ":time": tasks.DynamoAttributeValue.from_string(
                     sfn.JsonPath.string_at("$$.State.EnteredTime")
                 ),
-                "last_status": tasks.DynamoAttributeValue.from_string("SUCCESS"),
+                ":status": tasks.DynamoAttributeValue.from_string("SUCCESS"),
             },
             result_path="$.update_result",
         )
 
-        # Task: Record failure state
-        record_failure = tasks.DynamoUpdateItem(
+        # Task: Release lock and record failure
+        release_lock_failure = tasks.DynamoUpdateItem(
             self,
-            "RecordFailure",
+            "ReleaseLockFailure",
             table=self.state_table,
-            key={
-                "pipeline_id": tasks.DynamoAttributeValue.from_string("ticker_details"),
-            },
-            update_expression="SET last_status = :status, #err = :error, cause = :cause",
+            key={"pipeline_id": tasks.DynamoAttributeValue.from_string("ticker_details")},
+            update_expression="SET running = :running, last_status = :status, #err = :error, cause = :cause",
             expression_attribute_names={"#err": "error"},
             expression_attribute_values={
+                ":running": tasks.DynamoAttributeValue.from_boolean(False),
                 ":status": tasks.DynamoAttributeValue.from_string("FAILED"),
                 ":error": tasks.DynamoAttributeValue.from_string(
                     sfn.JsonPath.string_at("$.error.Error")
@@ -251,61 +268,33 @@ class TickerDetailsPipelineStack(Stack):
             error="BatchJobFailed",
             cause="Batch job failed - see DynamoDB for details",
         )
-        record_failure.next(fail_state)
+        release_lock_failure.next(fail_state)
 
         # Add error handling to Batch job
         run_batch.add_catch(
-            record_failure,
+            release_lock_failure,
             errors=["States.ALL"],
             result_path="$.error",
         )
 
-        # Handle missing state (first run) or missing last_run_time
-        check_state = sfn.Choice(self, "CheckStateExists")
-        set_defaults = sfn.Pass(
-            self,
-            "SetDefaults",
-            parameters={
-                "state": {
-                    "Item": {
-                        "last_run_time": {"S": ""},
-                    }
-                },
-                "force_full": sfn.JsonPath.string_at(
-                    "States.Format('{}', $.force_full)"
-                ),
-            },
-        )
-
-        pass_state = sfn.Pass(
-            self,
-            "PassState",
-            parameters={
-                "state": sfn.JsonPath.object_at("$.state"),
-                "force_full": sfn.JsonPath.string_at(
-                    "States.Format('{}', $.force_full)"
-                ),
-            },
-        )
+        # Check if already running
+        check_running = sfn.Choice(self, "CheckIfRunning")
 
         # Build state machine definition
         definition = get_state.next(
-            check_state.when(
-                sfn.Condition.or_(
-                    sfn.Condition.is_not_present("$.state.Item"),
-                    sfn.Condition.is_not_present("$.state.Item.last_run_time"),
-                ),
-                set_defaults.next(run_batch),
-            ).otherwise(pass_state.next(run_batch))
+            check_running.when(
+                sfn.Condition.boolean_equals("$.state.Item.running.BOOL", True),
+                skip_already_running,
+            ).otherwise(acquire_lock.next(run_batch))
         )
-        run_batch.next(update_state)
+        run_batch.next(release_lock_success)
 
         self.state_machine = sfn.StateMachine(
             self,
             "TickerDetailsPipelineStateMachine",
             state_machine_name="petals-ticker-details-pipeline",
             definition_body=sfn.DefinitionBody.from_chainable(definition),
-            timeout=Duration.hours(18),  # Slightly longer than job timeout
+            timeout=Duration.days(7),  # Slightly longer than job timeout
             tracing_enabled=True,
         )
 
@@ -329,7 +318,7 @@ class TickerDetailsPipelineStack(Stack):
             targets=[
                 targets.SfnStateMachine(
                     self.state_machine,
-                    input=events.RuleTargetInput.from_object({"force_full": False}),
+                    input=events.RuleTargetInput.from_object({}),
                 )
             ],
         )

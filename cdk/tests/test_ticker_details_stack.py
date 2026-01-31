@@ -45,11 +45,11 @@ class TestBatchCompute:
         )
 
     def test_job_has_long_timeout(self, template):
-        """Job definition has long timeout for initial backfill (16 hours)."""
+        """Job definition has long timeout for full backfill (6 days)."""
         template.has_resource_properties(
             'AWS::Batch::JobDefinition',
             {
-                'Timeout': {'AttemptDurationSeconds': 57600},  # 16 hours
+                'Timeout': {'AttemptDurationSeconds': 518400},  # 6 days
             },
         )
 
@@ -125,6 +125,26 @@ class TestStepFunctions:
                             Match.array_with(
                                 [
                                     Match.string_like_regexp(r'Catch'),
+                                ]
+                            ),
+                        ]
+                    ),
+                },
+            },
+        )
+
+    def test_has_concurrency_control(self, template):
+        """State machine checks for running flag to prevent concurrent executions."""
+        template.has_resource_properties(
+            'AWS::StepFunctions::StateMachine',
+            {
+                'DefinitionString': {
+                    'Fn::Join': Match.array_with(
+                        [
+                            '',
+                            Match.array_with(
+                                [
+                                    Match.string_like_regexp(r'SkipAlreadyRunning'),
                                 ]
                             ),
                         ]
