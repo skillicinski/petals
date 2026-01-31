@@ -145,3 +145,5 @@ AWS_PROFILE=personal LLM_BACKEND=ollama LIMIT_SPONSORS=50 LIMIT_TICKERS=150 \
 - `run_id` — pipeline execution ID (for CloudWatch correlation)
 
 **Cloud deployment:** AWS Batch with Bedrock (`meta.llama3-8b-instruct-v1:0`)
+
+**Scheduling:** On-demand only (no automatic schedule). Trigger with `just trigger entity_match false`

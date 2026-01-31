@@ -5,7 +5,8 @@ Components:
 - Batch compute environment (Fargate Spot for cost savings)
 - Batch job queue and job definition
 - Step Functions state machine for orchestration
-- EventBridge rule for weekly scheduling
+
+On-demand only (no schedule) - trigger manually with: just trigger entity_match false
 
 Uses AWS Bedrock for LLM alias generation (no external API key needed).
 """
@@ -23,8 +24,6 @@ from aws_cdk import aws_dynamodb as dynamodb
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecr as ecr
 from aws_cdk import aws_ecs as ecs
-from aws_cdk import aws_events as events
-from aws_cdk import aws_events_targets as targets
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_logs as logs
 from aws_cdk import aws_stepfunctions as sfn
@@ -279,28 +278,8 @@ class EntityMatchPipelineStack(Stack):
         # Grant state machine permissions
         self.state_table.grant_read_write_data(self.state_machine)
 
-        # =================================================================
-        # EventBridge Schedule (weekly on Sunday at 2 AM UTC)
-        # Run after trials and ticker_details have updated
-        # =================================================================
-        self.schedule_rule = events.Rule(
-            self,
-            "EntityMatchSchedule",
-            rule_name="petals-entity-match-weekly",
-            schedule=events.Schedule.cron(
-                minute="0",
-                hour="2",
-                month="*",
-                week_day="SUN",
-                year="*",
-            ),
-            targets=[
-                targets.SfnStateMachine(
-                    self.state_machine,
-                    input=events.RuleTargetInput.from_object({}),
-                )
-            ],
-        )
+        # NOTE: No EventBridge schedule - entity matching is on-demand only
+        # Trigger manually with: just trigger entity_match false
 
         # =================================================================
         # Outputs

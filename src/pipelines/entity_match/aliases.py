@@ -123,12 +123,19 @@ def generate_aliases_ollama(
     # Truncate long descriptions
     description = truncate_description(description)
 
-    prompt = f'''List aliases for "{company_name}" as a valid JSON array of strings only.
+    prompt = f'''List alternative names and abbreviations for "{company_name}" as a JSON array.
+
+Rules:
+- Include abbreviations (e.g., "GSK" for "GlaxoSmithKline")
+- Include name without legal suffixes (e.g., "Pfizer" for "Pfizer Inc.")
+- ONLY include names that refer to THIS EXACT company
+- NEVER include other company names like Pfizer, Merck, Novartis, etc. unless that IS the company
 '''
     if description:
         prompt += f"Context: {description}\n"
 
-    prompt += """Return ONLY the JSON array, no explanations. Example: ["Alias1", "Alias2"]
+    prompt += """
+Return ONLY the JSON array. Example: ["Alias1", "Alias2"]
 """
 
     try:
@@ -160,12 +167,19 @@ def generate_aliases_bedrock(
     # Truncate long descriptions
     description = truncate_description(description)
 
-    prompt = f'''List aliases for "{company_name}" as a valid JSON array of strings only.
+    prompt = f'''List alternative names and abbreviations for "{company_name}" as a JSON array.
+
+Rules:
+- Include abbreviations (e.g., "GSK" for "GlaxoSmithKline")
+- Include name without legal suffixes (e.g., "Pfizer" for "Pfizer Inc.")
+- ONLY include names that refer to THIS EXACT company
+- NEVER include other company names like Pfizer, Merck, Novartis, etc. unless that IS the company
 '''
     if description:
         prompt += f"Context: {description}\n"
 
-    prompt += """Return ONLY the JSON array, no explanations. Example: ["Alias1", "Alias2"]
+    prompt += """
+Return ONLY the JSON array. Example: ["Alias1", "Alias2"]
 """
 
     # Llama 3 format
