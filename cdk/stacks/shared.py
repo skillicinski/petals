@@ -1,5 +1,6 @@
 from aws_cdk import (
     CfnOutput,
+    Duration,
     RemovalPolicy,
     Stack,
 )
@@ -192,6 +193,25 @@ class SharedStack(Stack):
         # configured manually via console. See README.md in this directory.
 
         # =================================================================
+        # Pipeline Artifacts Bucket (staging/recovery)
+        # =================================================================
+        # Stores intermediate outputs before Iceberg writes, enabling
+        # recovery if final write fails. Also useful for debugging.
+        self.artifacts_bucket = s3.Bucket(
+            self,
+            'ArtifactsBucket',
+            bucket_name=f'petals-artifacts-{self.account}',
+            removal_policy=RemovalPolicy.RETAIN,
+            lifecycle_rules=[
+                s3.LifecycleRule(
+                    id='cleanup-old-recovery-files',
+                    prefix='recovery/',
+                    expiration=Duration.days(30),
+                ),
+            ],
+        )
+
+        # =================================================================
         # Shared ECR Repository (all pipelines)
         # =================================================================
         # Single image containing all pipeline code. Each pipeline sets
@@ -275,4 +295,20 @@ class SharedStack(Stack):
             value=self.ecr_repo.repository_uri,
             export_name="petals-ecr-repo-uri",
             description="Shared ECR repository URI for docker push",
+        )
+
+        CfnOutput(
+            self,
+            "ArtifactsBucketName",
+            value=self.artifacts_bucket.bucket_name,
+            export_name="petals-artifacts-bucket-name",
+            description="S3 bucket for pipeline artifacts/recovery",
+        )
+
+        CfnOutput(
+            self,
+            "ArtifactsBucketArn",
+            value=self.artifacts_bucket.bucket_arn,
+            export_name="petals-artifacts-bucket-arn",
+            description="S3 bucket ARN for pipeline artifacts/recovery",
         )

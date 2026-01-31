@@ -12,6 +12,7 @@ dependencies = [
     "pyarrow>=22.0.0",
     "pyiceberg>=0.10.0",
     "rapidfuzz>=3.14.3",
+    "s3fs>=2024.0.0",
 ]
 
 [project.optional-dependencies]

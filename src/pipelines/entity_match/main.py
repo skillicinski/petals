@@ -39,10 +39,13 @@ from .config import (
 )
 from .extract import fetch_sponsors, fetch_tickers
 from .load import (
+    ensure_namespace,
+    get_catalog,
     prepare_output,
     save_candidates_iceberg,
     save_candidates_json,
     save_candidates_parquet,
+    save_candidates_s3,
 )
 from .scoring import score_candidates
 
@@ -79,6 +82,16 @@ def run_pipeline():
     print(f'[main] Limits: sponsors={limit_sponsors or "all"}, tickers={limit_tickers or "all"}')
     print(f'[main] Thresholds: auto-approve≥{CONFIDENCE_AUTO_APPROVE:.0%}, '
           f'review={CONFIDENCE_REVIEW_LOW:.0%}-{CONFIDENCE_REVIEW_HIGH:.0%}')
+
+    # === Pre-flight checks ===
+    # Validate Iceberg namespace exists early to fail-fast before expensive LLM work
+    if save_iceberg:
+        print('\n[main] === PRE-FLIGHT CHECKS ===')
+        from .config import OUTPUT_TABLE
+        namespace = OUTPUT_TABLE.split('.')[0]
+        catalog = get_catalog()
+        ensure_namespace(catalog, namespace)
+        print(f'[main] Iceberg namespace ready: {namespace}')
 
     # === Extract ===
     print('\n[main] === EXTRACT ===')
@@ -119,13 +132,17 @@ def run_pipeline():
     print('\n[main] === LOAD ===')
     candidates_df = prepare_output(candidates_df, run_id)
 
-    # Always save locally
-    if output_path.endswith('.json'):
-        save_candidates_json(candidates_df, output_path)
-    else:
-        save_candidates_parquet(candidates_df, output_path)
+    # Stage to S3 first (for recovery if Iceberg fails)
+    s3_uri = save_candidates_s3(candidates_df, run_id)
 
-    # Optionally save to Iceberg
+    # Save locally only if not running in cloud (no S3 staging)
+    if not s3_uri:
+        if output_path.endswith('.json'):
+            save_candidates_json(candidates_df, output_path)
+        else:
+            save_candidates_parquet(candidates_df, output_path)
+
+    # Save to Iceberg
     if save_iceberg:
         save_candidates_iceberg(candidates_df)
 
@@ -141,7 +158,7 @@ def run_pipeline():
     print(f'[main]   - Auto-approved: {auto_approved}')
     print(f'[main]   - Pending review: {pending}')
     print(f'[main]   - Auto-rejected: {auto_rejected}')
-    print(f'[main] Output: {output_path}')
+    print(f'[main] Output: {s3_uri or output_path}')
 
     return candidates_df
 

@@ -40,6 +40,8 @@ class EntityMatchPipelineStack(Stack):
         table_bucket_arn = Fn.import_value('petals-table-bucket-arn')
         state_table_arn = Fn.import_value('petals-pipeline-state-table-arn')
         ecr_repo_arn = Fn.import_value('petals-ecr-repo-arn')
+        artifacts_bucket_name = Fn.import_value('petals-artifacts-bucket-name')
+        artifacts_bucket_arn = Fn.import_value('petals-artifacts-bucket-arn')
 
         # =================================================================
         # State Storage (imported from SharedStack)
@@ -119,6 +121,14 @@ class EntityMatchPipelineStack(Stack):
             )
         )
 
+        # S3 artifacts bucket access - for staging/recovery writes
+        self.job_role.add_to_policy(
+            iam.PolicyStatement(
+                actions=['s3:PutObject', 's3:GetObject'],
+                resources=[f'{artifacts_bucket_arn}/recovery/entity_match/*'],
+            )
+        )
+
         # Bedrock access for LLM alias generation
         self.job_role.add_to_policy(
             iam.PolicyStatement(
@@ -160,6 +170,7 @@ class EntityMatchPipelineStack(Stack):
                 ),
                 environment={
                     'TABLE_BUCKET_ARN': table_bucket_arn,
+                    'ARTIFACTS_BUCKET': artifacts_bucket_name,
                     'AWS_DEFAULT_REGION': self.region,
                     'PIPELINE': 'src.pipelines.entity_match.main',
                     'LLM_BACKEND': 'bedrock',

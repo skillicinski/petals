@@ -32,6 +32,18 @@ def get_catalog():
     )
 
 
+def ensure_namespace(catalog, namespace: str) -> None:
+    """Create namespace if it doesn't exist."""
+    try:
+        catalog.create_namespace(namespace)
+        print(f'[load] Created namespace: {namespace}')
+    except Exception as e:
+        if 'already exists' in str(e).lower():
+            print(f'[load] Namespace exists: {namespace}')
+        else:
+            raise
+
+
 def add_metadata_columns(df: pl.DataFrame, run_id: str) -> pl.DataFrame:
     """Add metadata columns for production tracking.
 
@@ -108,6 +120,24 @@ def save_candidates_parquet(df: pl.DataFrame, output_path: str | Path) -> None:
     print(f'[load] Saved {len(df)} candidates to {output_path}')
 
 
+def save_candidates_s3(df: pl.DataFrame, run_id: str) -> str | None:
+    """Save candidates to S3 artifacts bucket for recovery.
+
+    Writes to s3://{ARTIFACTS_BUCKET}/recovery/entity_match/{run_id}/candidates.parquet
+
+    Returns the S3 URI if successful, None if ARTIFACTS_BUCKET not set.
+    """
+    bucket = os.environ.get('ARTIFACTS_BUCKET')
+    if not bucket:
+        print('[load] ARTIFACTS_BUCKET not set, skipping S3 staging')
+        return None
+
+    s3_uri = f's3://{bucket}/recovery/entity_match/{run_id}/candidates.parquet'
+    df.write_parquet(s3_uri)
+    print(f'[load] Staged {len(df)} candidates to {s3_uri}')
+    return s3_uri
+
+
 def save_candidates_iceberg(df: pl.DataFrame) -> None:
     """Save candidates to Iceberg table (append mode).
 
@@ -115,6 +145,9 @@ def save_candidates_iceberg(df: pl.DataFrame) -> None:
     Appends new rows (preserves history for audit trail).
     """
     catalog = get_catalog()
+
+    namespace = OUTPUT_TABLE.split('.')[0]
+    ensure_namespace(catalog, namespace)
 
     # Check if table exists, create if not
     try:
