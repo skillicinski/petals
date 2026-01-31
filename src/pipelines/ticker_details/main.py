@@ -4,8 +4,8 @@ Main entry point for ticker details enrichment pipeline.
 Reads tickers from reference.tickers table, fetches detailed information
 from Massive API, and loads to reference.ticker_details table.
 
-Filters to pharma/biotech/medical tickers to reduce API calls and focus
-on tickers relevant for clinical trial sponsor matching.
+Filters to US stock tickers only. Industry filtering (e.g., pharma/biotech)
+is handled downstream in entity_match using SIC codes.
 
 Incremental Mode:
 - Only fetches details for tickers updated since last run
@@ -13,7 +13,7 @@ Incremental Mode:
 
 Rate Limiting:
 - Respects Massive free tier limit (5 calls/min)
-- Initial backfill for ~3,600 pharma-like tickers takes ~12 hours
+- Initial backfill for ~15,000 US stock tickers takes ~54 hours
 - Incremental runs typically complete in minutes
 """
 
@@ -26,7 +26,7 @@ import polars as pl
 import psutil
 from pyiceberg.catalog import load_catalog
 
-from .extract import fetch_ticker_details_batch, is_pharma_like
+from .extract import fetch_ticker_details_batch
 from .load import load_ticker_details, table_exists
 
 # Enable faulthandler - prints traceback on segfault
@@ -66,16 +66,17 @@ def get_tickers_to_enrich(
     table_bucket_arn: str,
     region: str,
     updated_since: datetime | None = None,
-    pharma_only: bool = True,
 ) -> list[tuple[str, str]]:
     """
     Get list of tickers to enrich from reference.tickers table.
+
+    Filters to US stock tickers only. Industry filtering (pharma/biotech)
+    is handled downstream using SIC codes from ticker_details.
 
     Args:
         table_bucket_arn: S3 Table Bucket ARN
         region: AWS region
         updated_since: Only include tickers updated after this time
-        pharma_only: Filter to pharma-like ticker names
 
     Returns:
         List of (ticker, market) tuples
@@ -87,22 +88,17 @@ def get_tickers_to_enrich(
 
     log(f"[main] Total tickers in table: {len(tickers_df):,}")
 
-    # Include all tickers (active + inactive) - historical trials may reference delisted companies
+    # Filter to US stocks only (includes active + inactive for historical trial matching)
+    tickers_df = tickers_df.filter(
+        (pl.col("market") == "stocks") & (pl.col("locale") == "us")
+    )
+    log(f"[main] US stock tickers: {len(tickers_df):,}")
 
     # Filter by last_updated_utc if incremental
     if updated_since:
         updated_since_str = updated_since.isoformat()
         tickers_df = tickers_df.filter(pl.col("last_updated_utc") > updated_since_str)
         log(f"[main] Tickers updated since {updated_since_str}: {len(tickers_df):,}")
-
-    # Filter to pharma-like names
-    if pharma_only:
-        # Apply pharma keyword filter
-        tickers_df = tickers_df.with_columns(
-            pl.col("name").map_elements(is_pharma_like, return_dtype=pl.Boolean).alias("is_pharma")
-        )
-        tickers_df = tickers_df.filter(pl.col("is_pharma"))
-        log(f"[main] Pharma-like tickers: {len(tickers_df):,}")
 
     # Extract (ticker, market) tuples
     result = [
@@ -120,7 +116,6 @@ def run(
     region: str = "us-east-1",
     force_full: bool = False,
     last_run_time: str | None = None,
-    pharma_only: bool = True,
     rate_limit_delay: float = 13.0,
     load_batch_size: int = 10,  # Small batches for frequent writes
 ) -> dict:
@@ -133,7 +128,6 @@ def run(
         region: AWS region
         force_full: Force full extraction even if we have data
         last_run_time: ISO timestamp from last pipeline run
-        pharma_only: Only enrich pharma-like tickers (recommended)
         rate_limit_delay: Seconds between API calls (13s = under 5/min limit)
         load_batch_size: How often to flush to S3 Tables
 
@@ -158,7 +152,7 @@ def run(
 
     log("[main] Pipeline starting")
     log(f"[main] force_full={force_full}, last_run_time={last_run_time or '(not set)'}")
-    log(f"[main] pharma_only={pharma_only}, rate_limit_delay={rate_limit_delay}s")
+    log(f"[main] rate_limit_delay={rate_limit_delay}s")
     log_memory("startup")
 
     # Determine incremental window
@@ -170,7 +164,7 @@ def run(
                 updated_since = datetime.fromisoformat(last_run_time.replace("Z", "+00:00"))
                 log(f"[main] Incremental mode (since: {updated_since.isoformat()})")
             else:
-                log("[main] No last_run_time, will fetch all pharma-like tickers")
+                log("[main] No last_run_time, will fetch all US stock tickers")
         else:
             log("[main] Table does not exist, full extraction mode")
 
@@ -179,7 +173,6 @@ def run(
         table_bucket_arn=table_bucket_arn,
         region=region,
         updated_since=updated_since,
-        pharma_only=pharma_only,
     )
 
     if len(tickers) == 0:

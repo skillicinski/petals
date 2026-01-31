@@ -45,18 +45,19 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for system diagram.
 
 ### reference.ticker_details
 
-**Purpose:** Enriched ticker details from Massive API, focused on pharma/biotech/medical companies for entity matching with clinical trial sponsors.
+**Purpose:** Enriched ticker details from Massive API for US stock tickers. SIC codes enable downstream industry filtering (e.g., pharma/biotech for entity matching with clinical trial sponsors).
 
 **Primary Key:** `(ticker, market)` composite - matches the tickers table.
 
 **Change Strategy:** SCD Type 1 (upsert) - existing records updated in place. Incremental runs filter source tickers by `last_updated_utc`.
 
 **Design Notes:**
-- Filtered to pharma-like ticker names at extraction time to reduce API calls (~3,600 vs 68,000)
-- Key fields: `sic_code`, `sic_description` for industry classification
+- Filtered to US stock tickers (`market='stocks'`, `locale='us'`) at extraction time (~15,000 tickers)
+- Industry filtering (pharma/biotech) done downstream using `sic_code` field
+- Key SIC codes: 2833 (Medicinal Chemicals), 2834 (Pharmaceuticals), 2835 (Diagnostics), 2836 (Biologicals)
 - `description`, `homepage_url` useful for LLM-based entity matching verification
 - ADRs (foreign companies) have no SIC code - handled separately in matching logic
-- Initial backfill takes ~12 hours due to API rate limiting (5 calls/min)
+- Initial backfill takes ~54 hours due to API rate limiting (5 calls/min)
 
 ### clinical.trials
 
@@ -114,10 +115,12 @@ The ~43% in medium tier contains both true positives and false positives - this 
 
 **Approach:** Use LLM to generate company name aliases from ticker_details records.
 
-**Implementation:** `src/pipelines/alias_gen/`
+**Implementation:** `src/pipelines/entity_match/`
+- Reads distinct sponsors from `clinical.trials`
 - Reads companies from `reference.ticker_details`
-- Generates aliases via LLM (Ollama locally, Bedrock for cloud)
-- Outputs to JSON file (Iceberg table optional)
+- Generates aliases via LLM (Ollama locally, Bedrock for cloud) for both sides
+- Blocks via token overlap, scores via Jaccard + fuzzy matching
+- Outputs candidate matches with confidence scores
 
 **Local testing:**
 ```bash
@@ -125,18 +128,19 @@ The ~43% in medium tier contains both true positives and false positives - this 
 ollama serve
 ollama pull llama3.2:3b
 
-# Run pipeline
-AWS_PROFILE=personal LLM_BACKEND=ollama LIMIT=50 \
-  python -m src.pipelines.alias_gen.main
+# Run pipeline (limited for testing)
+AWS_PROFILE=personal LLM_BACKEND=ollama LIMIT_SPONSORS=50 LIMIT_TICKERS=100 \
+  python -m src.pipelines.entity_match.main
 ```
 
-**Results (50 company test):**
-- 221 aliases generated (4.4 avg per company)
-- ~2 seconds per company locally
-- Zero failures
-- Quality: Picked up historical names (e.g., "Biogen Idec"), relevant abbreviations
+**Output:** `matching.sponsor_ticker_candidates` table with:
+- `sponsor_name`, `ticker`, `market`, `name`
+- `sponsor_aliases`, `ticker_aliases` (for audit/debugging)
+- `confidence` (0-1 score)
+- `needs_review` (true if confidence in uncertain band 60-85%)
+- `match_reason` (which aliases matched)
 
 **Open questions for production:**
 - Cloud deployment: ECS with Ollama sidecar vs Lambda with Bedrock
 - Alias validation: How to filter hallucinated aliases
-- Storage: Persist to Iceberg table or keep as lookup JSON
+- Human review workflow: How to surface `needs_review` candidates for validation

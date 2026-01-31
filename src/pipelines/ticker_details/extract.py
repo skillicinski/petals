@@ -7,8 +7,8 @@ descriptions, and other metadata useful for entity matching.
 Rate Limiting
 =============
 Massive free tier allows 5 calls/minute. This pipeline respects that limit
-with configurable delays between requests. For ~3,600 pharma-like tickers,
-initial backfill takes ~12 hours.
+with configurable delays between requests. For ~15,000 US stock tickers,
+initial backfill takes ~54 hours.
 
 Incremental Fetching
 ====================
@@ -164,36 +164,6 @@ def fetch_ticker_details_batch(
             )
 
     print(f"Fetch complete: {fetched} fetched, {skipped} skipped")
-
-
-# Keywords to identify pharma/biotech/medical tickers
-PHARMA_KEYWORDS = [
-    "pharm",
-    "bio",
-    "thera",
-    "medic",
-    "health",
-    "drug",
-    "onco",
-    "immun",
-    "genetic",
-    "genom",
-    "diagnos",
-    "clinic",
-    "surgical",
-    "dental",
-    "ophthalm",
-    "cardio",
-    "neuro",
-]
-
-
-def is_pharma_like(name: str | None) -> bool:
-    """Check if a ticker name suggests pharma/biotech/medical company."""
-    if not name:
-        return False
-    name_lower = name.lower()
-    return any(kw in name_lower for kw in PHARMA_KEYWORDS)
 
 
 if __name__ == "__main__":
