@@ -109,38 +109,39 @@ Results (1000 sponsor sample):
 
 The ~43% in medium tier contains both true positives and false positives - this is where additional verification adds value.
 
-### Alias Generation Pipeline (Proof of Concept)
+### Entity Matching Pipeline
 
-**Status:** Local proof of concept validated. Not yet deployed to cloud.
+**Status:** Production-ready. Uses LLM-generated aliases for sponsor↔ticker matching.
 
-**Approach:** Use LLM to generate company name aliases from ticker_details records.
+**Approach:** 
+1. Generate aliases for both sponsors (left) and tickers (right) via LLM
+2. Block candidate pairs via token overlap (reduces O(n×m) comparisons)
+3. Score candidates using Jaccard similarity + fuzzy matching
+4. Auto-approve/reject based on confidence thresholds; flag uncertain matches for review
 
 **Implementation:** `src/pipelines/entity_match/`
-- Reads distinct sponsors from `clinical.trials`
-- Reads companies from `reference.ticker_details`
-- Generates aliases via LLM (Ollama locally, Bedrock for cloud) for both sides
-- Blocks via token overlap, scores via Jaccard + fuzzy matching
-- Outputs candidate matches with confidence scores
+- `extract.py` — fetch distinct sponsors + tickers from S3 Tables
+- `aliases.py` — LLM alias generation (Ollama locally, Bedrock for cloud)
+- `blocking.py` — token overlap candidate generation
+- `scoring.py` — confidence scoring with auto-decision logic
+- `load.py` — output to Parquet/Iceberg with audit columns
+- `config.py` — thresholds (auto-approve ≥90%, auto-reject <50%)
 
 **Local testing:**
 ```bash
-# Start Ollama server
-ollama serve
-ollama pull llama3.2:3b
+ollama serve && ollama pull llama3.2:3b
 
-# Run pipeline (limited for testing)
-AWS_PROFILE=personal LLM_BACKEND=ollama LIMIT_SPONSORS=50 LIMIT_TICKERS=100 \
+AWS_PROFILE=personal LLM_BACKEND=ollama LIMIT_SPONSORS=50 LIMIT_TICKERS=150 \
   python -m src.pipelines.entity_match.main
 ```
 
 **Output:** `matching.sponsor_ticker_candidates` table with:
-- `sponsor_name`, `ticker`, `market`, `name`
-- `sponsor_aliases`, `ticker_aliases` (for audit/debugging)
-- `confidence` (0-1 score)
-- `needs_review` (true if confidence in uncertain band 60-85%)
-- `match_reason` (which aliases matched)
+- `sponsor_name`, `ticker`, `market`, `ticker_name` — entity identifiers
+- `sponsor_aliases`, `ticker_aliases` — for audit/debugging
+- `confidence` — 0-1 match score
+- `status` — 'approved', 'pending', or 'rejected'
+- `approved_by`, `rejected_by` — 'machine' or human identifier
+- `created_at`, `reviewed_at` — timestamps for audit trail
+- `run_id` — pipeline execution ID (for CloudWatch correlation)
 
-**Open questions for production:**
-- Cloud deployment: ECS with Ollama sidecar vs Lambda with Bedrock
-- Alias validation: How to filter hallucinated aliases
-- Human review workflow: How to surface `needs_review` candidates for validation
+**Cloud deployment:** AWS Batch with Bedrock (`meta.llama3-8b-instruct-v1:0`)

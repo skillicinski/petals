@@ -1,4 +1,9 @@
-"""Extract company data from S3 Tables for alias generation."""
+"""Extract entities from S3 Tables for matching.
+
+Fetches:
+- Left side: distinct sponsors from clinical.trials
+- Right side: companies from reference.ticker_details
+"""
 
 import os
 
@@ -26,7 +31,30 @@ def get_catalog():
     )
 
 
-def fetch_companies(limit: int | None = None) -> pl.DataFrame:
+def fetch_sponsors(limit: int | None = None) -> pl.DataFrame:
+    """Fetch distinct sponsor names from clinical.trials.
+
+    Returns DataFrame with columns: sponsor_name
+    """
+    catalog = get_catalog()
+    table = catalog.load_table('clinical.trials')
+
+    scan = table.scan(
+        selected_fields=['sponsor_name'],
+        row_filter='sponsor_name IS NOT NULL'
+    )
+    arrow_table = scan.to_arrow()
+
+    df = pl.from_arrow(arrow_table).unique().sort('sponsor_name')
+
+    if limit:
+        df = df.head(limit)
+
+    print(f'[extract] Fetched {len(df)} distinct sponsors from clinical.trials')
+    return df
+
+
+def fetch_tickers(limit: int | None = None) -> pl.DataFrame:
     """Fetch companies from ticker_details table.
 
     Returns DataFrame with columns: ticker, market, name, description
@@ -34,41 +62,16 @@ def fetch_companies(limit: int | None = None) -> pl.DataFrame:
     catalog = get_catalog()
     table = catalog.load_table('reference.ticker_details')
 
-    # Read to Arrow then Polars
     scan = table.scan(
         selected_fields=['ticker', 'market', 'name', 'description'],
-        row_filter='description IS NOT NULL'
+        row_filter='name IS NOT NULL'
     )
     arrow_table = scan.to_arrow()
 
-    df = pl.from_arrow(arrow_table)
+    df = pl.from_arrow(arrow_table).sort('name')
 
     if limit:
         df = df.head(limit)
 
-    print(f'[extract] Fetched {len(df)} companies from ticker_details')
+    print(f'[extract] Fetched {len(df)} tickers from ticker_details')
     return df
-
-
-def fetch_existing_aliases() -> dict[str, list[str]]:
-    """Fetch existing aliases from alias table (if exists).
-
-    Returns dict mapping (ticker, market) -> list of aliases.
-    """
-    try:
-        catalog = get_catalog()
-        table = catalog.load_table('reference.ticker_aliases')
-        arrow_table = table.scan().to_arrow()
-        df = pl.from_arrow(arrow_table)
-
-        # Build lookup dict
-        aliases = {}
-        for row in df.iter_rows(named=True):
-            key = f"{row['ticker']}|{row['market']}"
-            aliases[key] = row.get('aliases', [])
-
-        print(f'[extract] Loaded {len(aliases)} existing alias records')
-        return aliases
-    except Exception:
-        print('[extract] No existing alias table found')
-        return {}

@@ -1,9 +1,8 @@
-"""Tests for alias generation pipeline."""
+"""Tests for entity matching pipeline."""
 
-import json
 import pytest
 
-from src.pipelines.alias_gen.transform import parse_aliases_response
+from src.pipelines.entity_match.aliases import parse_aliases_response
 
 
 class TestParseAliasesResponse:
@@ -65,13 +64,13 @@ class TestGenerateAliases:
     @pytest.fixture
     def ollama_available(self):
         """Check if Ollama is available for integration tests."""
-        from src.pipelines.alias_gen.transform import check_ollama_available
+        from src.pipelines.entity_match.aliases import check_ollama_available
         if not check_ollama_available():
             pytest.skip('Ollama not available - start with: ollama serve')
 
     def test_generate_aliases_returns_list(self, ollama_available):
         """Alias generation returns a list of strings."""
-        from src.pipelines.alias_gen.transform import generate_aliases
+        from src.pipelines.entity_match.aliases import generate_aliases
 
         # Use a well-known company with description for consistent results
         result = generate_aliases(
@@ -86,7 +85,7 @@ class TestGenerateAliases:
 
     def test_generate_aliases_known_company(self, ollama_available):
         """Known company gets relevant aliases."""
-        from src.pipelines.alias_gen.transform import generate_aliases
+        from src.pipelines.entity_match.aliases import generate_aliases
 
         result = generate_aliases(
             'Johnson & Johnson',

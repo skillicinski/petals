@@ -1,1 +1,1 @@
-"""Alias generation pipeline for entity matching."""
+"""Entity matching pipeline for sponsor↔ticker resolution."""

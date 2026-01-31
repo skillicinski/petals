@@ -1,95 +1,149 @@
-"""Alias generation pipeline - main entry point.
+"""Entity matching pipeline - main entry point.
 
-Generates company name aliases using LLM for entity matching.
+Matches clinical trial sponsors to public company tickers using
+LLM-generated aliases and fuzzy matching.
 
 Environment variables:
     TABLE_BUCKET_ARN: S3 Tables bucket ARN
     LLM_BACKEND: 'ollama' (local) or 'bedrock' (cloud)
     OLLAMA_MODEL: Model name for Ollama (default: llama3.2:3b)
     BEDROCK_MODEL: Model ID for Bedrock (default: meta.llama3-8b-instruct-v1:0)
-    OUTPUT_PATH: Path for JSON output (default: data/aliases.json)
-    LIMIT: Max companies to process (default: all)
+    OUTPUT_PATH: Path for JSON/Parquet output (default: data/candidates.parquet)
+    LIMIT_SPONSORS: Max sponsors to process (default: all)
+    LIMIT_TICKERS: Max tickers to process (default: all)
     SAVE_ICEBERG: Set to '1' to save to Iceberg table
+    RUN_ID: Pipeline run identifier (default: auto-generated UUID)
 
 Usage:
     # Local with Ollama (start `ollama serve` first)
-    LLM_BACKEND=ollama LIMIT=10 python -m src.pipelines.alias_gen.main
+    AWS_PROFILE=personal LLM_BACKEND=ollama LIMIT_SPONSORS=50 LIMIT_TICKERS=100 \\
+        python -m src.pipelines.entity_match.main
 
     # Cloud with Bedrock
-    LLM_BACKEND=bedrock python -m src.pipelines.alias_gen.main
+    LLM_BACKEND=bedrock python -m src.pipelines.entity_match.main
 """
 
 import os
-import sys
 import time
+import uuid
 
-from .extract import fetch_companies, fetch_existing_aliases
-from .load import build_aliases_dataframe, save_aliases_iceberg, save_aliases_json
-from .transform import generate_aliases
+from .aliases import enrich_with_aliases
+from .blocking import generate_candidates
+from .config import (
+    CONFIDENCE_AUTO_APPROVE,
+    CONFIDENCE_REVIEW_HIGH,
+    CONFIDENCE_REVIEW_LOW,
+    STATUS_APPROVED,
+    STATUS_PENDING,
+    STATUS_REJECTED,
+)
+from .extract import fetch_sponsors, fetch_tickers
+from .load import (
+    prepare_output,
+    save_candidates_iceberg,
+    save_candidates_json,
+    save_candidates_parquet,
+)
+from .scoring import score_candidates
+
+
+def generate_run_id() -> str:
+    """Generate a unique run ID for this pipeline execution.
+
+    Uses RUN_ID env var if set (e.g., from Step Functions execution ID),
+    otherwise generates a UUID.
+
+    The run_id can be used to correlate:
+    - Output rows in the candidates table
+    - CloudWatch logs for this execution
+    - Step Functions execution history
+    """
+    return os.environ.get('RUN_ID') or str(uuid.uuid4())
 
 
 def run_pipeline():
-    """Run the alias generation pipeline."""
+    """Run the entity matching pipeline."""
     start_time = time.time()
+    run_id = generate_run_id()
 
     # Configuration
-    limit = int(os.environ.get('LIMIT', 0)) or None
-    output_path = os.environ.get('OUTPUT_PATH', 'data/aliases.json')
+    limit_sponsors = int(os.environ.get('LIMIT_SPONSORS', 0)) or None
+    limit_tickers = int(os.environ.get('LIMIT_TICKERS', 0)) or None
+    output_path = os.environ.get('OUTPUT_PATH', 'data/candidates.parquet')
     save_iceberg = os.environ.get('SAVE_ICEBERG', '0') == '1'
     backend = os.environ.get('LLM_BACKEND', 'ollama')
 
-    print(f'[main] Starting alias generation pipeline')
-    print(f'[main] Backend: {backend}, Limit: {limit or "all"}')
+    print(f'[main] Starting entity matching pipeline')
+    print(f'[main] Run ID: {run_id}')
+    print(f'[main] Backend: {backend}')
+    print(f'[main] Limits: sponsors={limit_sponsors or "all"}, tickers={limit_tickers or "all"}')
+    print(f'[main] Thresholds: auto-approve≥{CONFIDENCE_AUTO_APPROVE:.0%}, '
+          f'review={CONFIDENCE_REVIEW_LOW:.0%}-{CONFIDENCE_REVIEW_HIGH:.0%}')
 
-    # Extract
-    companies_df = fetch_companies(limit=limit)
-    existing_aliases = fetch_existing_aliases()
+    # === Extract ===
+    print('\n[main] === EXTRACT ===')
+    sponsors_df = fetch_sponsors(limit=limit_sponsors)
+    tickers_df = fetch_tickers(limit=limit_tickers)
 
-    # Transform - generate aliases for each company
-    aliases_dict: dict[str, list[str]] = {}
-    processed = 0
-    skipped = 0
+    # === Generate Aliases ===
+    print('\n[main] === ALIAS GENERATION ===')
 
-    for i, row in enumerate(companies_df.iter_rows(named=True)):
-        ticker = row['ticker']
-        market = row['market']
-        name = row['name']
-        description = row['description']
-        key = f'{ticker}|{market}'
+    print(f'[main] Generating aliases for {len(sponsors_df)} sponsors...')
+    sponsors_df = enrich_with_aliases(
+        sponsors_df,
+        name_col='sponsor_name',
+        backend=backend,
+    )
 
-        # Skip if already have aliases
-        if key in existing_aliases and existing_aliases[key]:
-            skipped += 1
-            continue
+    print(f'[main] Generating aliases for {len(tickers_df)} tickers...')
+    tickers_df = enrich_with_aliases(
+        tickers_df,
+        name_col='name',
+        description_col='description',
+        backend=backend,
+    )
 
-        # Generate aliases
-        try:
-            aliases = generate_aliases(name, description, backend=backend)
-            aliases_dict[key] = aliases
-            processed += 1
+    # === Blocking ===
+    print('\n[main] === BLOCKING ===')
+    candidates_df = generate_candidates(sponsors_df, tickers_df)
 
-            if processed % 10 == 0:
-                elapsed = time.time() - start_time
-                rate = processed / elapsed
-                print(f'[main] Processed {processed}/{len(companies_df)} ({rate:.1f}/s)')
+    if len(candidates_df) == 0:
+        print('[main] No candidates generated. Exiting.')
+        return None
 
-        except Exception as e:
-            print(f'[main] Error processing {ticker}: {e}', file=sys.stderr)
-            aliases_dict[key] = []
+    # === Scoring ===
+    print('\n[main] === SCORING ===')
+    candidates_df = score_candidates(candidates_df)
 
-    print(f'[main] Generated aliases for {processed} companies, skipped {skipped}')
+    # === Prepare Output ===
+    print('\n[main] === LOAD ===')
+    candidates_df = prepare_output(candidates_df, run_id)
 
-    # Load - save results
-    save_aliases_json(aliases_dict, output_path)
+    # Always save locally
+    if output_path.endswith('.json'):
+        save_candidates_json(candidates_df, output_path)
+    else:
+        save_candidates_parquet(candidates_df, output_path)
 
+    # Optionally save to Iceberg
     if save_iceberg:
-        result_df = build_aliases_dataframe(companies_df, aliases_dict)
-        save_aliases_iceberg(result_df)
+        save_candidates_iceberg(candidates_df)
 
+    # Summary
     elapsed = time.time() - start_time
-    print(f'[main] Pipeline complete in {elapsed:.1f}s')
+    auto_approved = (candidates_df['status'] == STATUS_APPROVED).sum()
+    pending = (candidates_df['status'] == STATUS_PENDING).sum()
+    auto_rejected = (candidates_df['status'] == STATUS_REJECTED).sum()
 
-    return aliases_dict
+    print(f'\n[main] Pipeline complete in {elapsed:.1f}s')
+    print(f'[main] Run ID: {run_id}')
+    print(f'[main] Results: {len(candidates_df)} candidates')
+    print(f'[main]   - Auto-approved: {auto_approved}')
+    print(f'[main]   - Pending review: {pending}')
+    print(f'[main]   - Auto-rejected: {auto_rejected}')
+    print(f'[main] Output: {output_path}')
+
+    return candidates_df
 
 
 if __name__ == '__main__':

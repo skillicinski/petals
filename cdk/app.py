@@ -2,6 +2,7 @@
 import os
 
 import aws_cdk as cdk
+from stacks.pipelines.entity_match import EntityMatchPipelineStack
 from stacks.pipelines.ticker_details import TickerDetailsPipelineStack
 from stacks.pipelines.tickers import TickersPipelineStack
 from stacks.pipelines.trials import TrialsPipelineStack
@@ -19,5 +20,6 @@ SharedStack(app, "petals-shared")
 TickersPipelineStack(app, "petals-tickers-pipeline", env=env)
 TrialsPipelineStack(app, "petals-trials-pipeline", env=env)
 TickerDetailsPipelineStack(app, "petals-ticker-details-pipeline", env=env)
+EntityMatchPipelineStack(app, "petals-entity-match-pipeline", env=env)
 
 app.synth()
