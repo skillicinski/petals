@@ -237,19 +237,21 @@ deploy skip_tests="false":
     echo -e "\n${DIM}[6/6]${NC} CDK deploy..."
     cd cdk
     
-    # Check for changes first
+    # Check for changes - look for "Number of stacks with differences: N"
     DIFF_OUTPUT=$(uv run cdk diff --all --profile {{profile}} 2>&1 || true)
     
-    if echo "$DIFF_OUTPUT" | grep -qE "^Stack |Resources$|there is no difference|no differences"; then
-        if echo "$DIFF_OUTPUT" | grep -q "there is no difference\|no differences"; then
-            echo -e "  $SKIP No infrastructure changes"
-        else
-            uv run cdk deploy --all --require-approval never --profile {{profile}}
-            echo -e "  $OK Deployed all stacks"
-        fi
-    else
+    # Extract the number of stacks with differences (0 = no changes)
+    STACKS_WITH_DIFF=$(echo "$DIFF_OUTPUT" | grep -o 'Number of stacks with differences: [0-9]*' | grep -o '[0-9]*$' || echo "")
+    
+    if [ -z "$STACKS_WITH_DIFF" ]; then
+        # Couldn't parse diff output - deploy to be safe
         uv run cdk deploy --all --require-approval never --profile {{profile}}
         echo -e "  $OK Deployed all stacks"
+    elif [ "$STACKS_WITH_DIFF" = "0" ]; then
+        echo -e "  $SKIP No infrastructure changes"
+    else
+        uv run cdk deploy --all --require-approval never --profile {{profile}}
+        echo -e "  $OK Deployed $STACKS_WITH_DIFF stack(s)"
     fi
     
     echo -e "\n${GREEN}✓ Deployment complete${NC}"
