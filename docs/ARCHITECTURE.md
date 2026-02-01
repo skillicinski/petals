@@ -32,12 +32,18 @@ flowchart TB
         BATCH2[AWS Batch<br/>Fargate Spot]
     end
 
+    subgraph EntityMatchPipeline["Entity Match Pipeline (petals-entity-match-pipeline)"]
+        SFN4[Step Functions<br/>On-demand]
+        BATCH4[AWS Batch<br/>Fargate Spot]
+    end
+
     subgraph Shared["Shared Stack (petals-shared)"]
         ECR[ECR<br/>petals-pipelines]
         DDB[(DynamoDB<br/>Pipeline State)]
         subgraph S3Tables["S3 Tables (Iceberg)"]
             NS_REF[reference.*]
             NS_CLINICAL[clinical.*]
+            NS_MATCHING[matching.*]
         end
     end
 
@@ -73,6 +79,13 @@ flowchart TB
     ECR --> BATCH2
     BATCH2 -->|upsert| NS_CLINICAL
 
+    %% Entity match pipeline flow
+    NS_REF -->|read tickers| BATCH4
+    NS_CLINICAL -->|read sponsors| BATCH4
+    SFN4 --> BATCH4
+    ECR --> BATCH4
+    BATCH4 -->|write matches| NS_MATCHING
+
     %% Query flow
     USER --> ATH
     ATH --> S3Tables
@@ -91,6 +104,11 @@ EventBridge triggers Step Functions → reads last run time from DynamoDB → su
 ### Trials Pipeline (daily, 7 AM UTC)
 EventBridge triggers Step Functions → reads last run time from DynamoDB → submits Batch job → container fetches COMPLETED studies from ClinicalTrials.gov (filtered to INDUSTRY sponsors) → upserts to S3 Tables `clinical.trials` → records new timestamp
 
+### Entity Match Pipeline (on-demand)
+Manual trigger → Step Functions submits Batch job → reads sponsors from `clinical.trials` and tickers from `reference.ticker_details` → computes sentence-transformer embeddings → scores candidate pairs via cosine similarity → applies greedy 1:1 matching → writes matched pairs to `matching.sponsor_ticker_candidates`
+
+*Note: Uses CPU-only embedding model (`all-MiniLM-L6-v2`), no GPU required. Full run completes in ~21 seconds.*
+
 ### Query
 Athena queries S3 Tables via federated catalog (`s3tablescatalog`)
 
@@ -101,4 +119,5 @@ Athena queries S3 Tables via federated catalog (`s3tablescatalog`)
 | `reference` | `tickers` | Stock/ETF ticker reference data from Massive API |
 | `reference` | `ticker_details` | Enriched ticker details (SIC codes, descriptions) for US stock tickers |
 | `clinical` | `trials` | Completed clinical trials from ClinicalTrials.gov (INDUSTRY sponsors) |
+| `matching` | `sponsor_ticker_candidates` | Sponsor↔ticker matches with confidence scores (embedding similarity) |
 

@@ -143,9 +143,29 @@ test *args:
 # =============================================================================
 
 ecr_repo := "petals-pipelines"
+ecr_base_repo := "petals-base"
+
+# Rebuild base image (rare - only when upgrading torch/transformers)
+build-base:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ECR_URI="{{account_id}}.dkr.ecr.{{region}}.amazonaws.com"
+    
+    echo "Building base image with ML dependencies..."
+    docker build -f Dockerfile.base -t petals-base .
+    
+    echo "Logging into ECR..."
+    aws ecr get-login-password --profile {{profile}} --region {{region}} \
+        | docker login --username AWS --password-stdin "$ECR_URI" >/dev/null 2>&1
+    
+    echo "Pushing to ECR..."
+    docker tag petals-base:latest "$ECR_URI/{{ecr_base_repo}}:latest"
+    docker push "$ECR_URI/{{ecr_base_repo}}:latest"
+    
+    echo "✓ Base image updated"
 
 # Full deploy: sync → format → test → build → push → cdk deploy
-# Skip tests with: just deploy skip_tests=true
+# Skip tests with: just deploy true
 deploy skip_tests="false":
     #!/usr/bin/env bash
     set -euo pipefail

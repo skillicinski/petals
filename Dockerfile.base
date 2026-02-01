@@ -1,0 +1,26 @@
+# Dockerfile.base - Pre-baked base image with ALL dependencies
+# Build once, iterate fast. Rebuild when pyproject.toml changes.
+#
+# Build & push:
+#   just build-base
+
+FROM --platform=linux/amd64 python:3.12-slim
+
+# Install uv for fast dependency resolution
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+WORKDIR /app
+
+# Copy dependency files (these rarely change)
+COPY pyproject.toml uv.lock ./
+
+# Install ALL dependencies with CPU-only PyTorch
+# This takes ~5min but only needs to run when deps change
+RUN uv sync --frozen --no-dev --no-editable \
+    --extra-index-url https://download.pytorch.org/whl/cpu
+
+# Pre-download the embedding model
+ENV PATH="/app/.venv/bin:$PATH"
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+
+ENV PYTHONUNBUFFERED=1

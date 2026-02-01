@@ -8,7 +8,7 @@ Components:
 
 On-demand only (no schedule) - trigger manually with: just trigger entity_match false
 
-Uses AWS Bedrock for LLM alias generation (no external API key needed).
+Uses sentence-transformer embeddings.
 """
 
 from aws_cdk import (
@@ -128,23 +128,10 @@ class EntityMatchPipelineStack(Stack):
             )
         )
 
-        # Bedrock access for LLM alias generation
-        self.job_role.add_to_policy(
-            iam.PolicyStatement(
-                actions=[
-                    "bedrock:InvokeModel",
-                    "bedrock:InvokeModelWithResponseStream",
-                ],
-                resources=[
-                    f"arn:aws:bedrock:{self.region}::foundation-model/meta.llama3-8b-instruct-v1:0",
-                ],
-            )
-        )
-
         # =================================================================
         # Batch Job Definition
-        # Timeout based on full dataset: ~10k sponsors × ~2k tickers
-        # At ~1.5 entities/sec, ~8 hours for full run
+        # Embedding-based matching: ~21 seconds for full dataset
+        # 4GB memory for sentence-transformer model (~500MB) + embeddings
         # =================================================================
         self.job_definition = batch.EcsJobDefinition(
             self,
@@ -154,8 +141,8 @@ class EntityMatchPipelineStack(Stack):
                 self,
                 "EntityMatchContainer",
                 image=ecs.ContainerImage.from_ecr_repository(self.ecr_repo, "latest"),
-                cpu=1,  # More CPU for LLM processing
-                memory=Size.mebibytes(4096),  # 4 GB for processing
+                cpu=1,
+                memory=Size.mebibytes(4096),  # 4 GB for model + embeddings
                 job_role=self.job_role,
                 logging=ecs.LogDriver.aws_logs(
                     stream_prefix="entity-match-pipeline",
@@ -172,12 +159,11 @@ class EntityMatchPipelineStack(Stack):
                     "ARTIFACTS_BUCKET": artifacts_bucket_name,
                     "AWS_DEFAULT_REGION": self.region,
                     "PIPELINE": "src.pipelines.entity_match.main",
-                    "LLM_BACKEND": "bedrock",
                     "SAVE_ICEBERG": "1",
                 },
                 assign_public_ip=True,
             ),
-            timeout=Duration.hours(12),  # Allow for full dataset processing
+            timeout=Duration.minutes(30),  # Usually completes in <1 min
             retry_attempts=1,
         )
 
@@ -271,7 +257,7 @@ class EntityMatchPipelineStack(Stack):
             "EntityMatchPipelineStateMachine",
             state_machine_name="petals-entity-match-pipeline",
             definition_body=sfn.DefinitionBody.from_chainable(definition),
-            timeout=Duration.hours(14),  # Slightly longer than job timeout
+            timeout=Duration.hours(1),  # Usually completes in <1 min
             tracing_enabled=True,
         )
 

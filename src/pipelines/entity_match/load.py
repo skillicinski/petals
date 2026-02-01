@@ -79,15 +79,11 @@ def select_output_columns(df: pl.DataFrame) -> pl.DataFrame:
         "market",
         "ticker_name",
         # Match context
-        "sponsor_aliases",
-        "ticker_aliases",
         "match_reason",
         # Scoring
         "confidence",
         # Review status
         "status",
-        "approved_by",
-        "rejected_by",
         # Timestamps
         "created_at",
         "reviewed_at",
@@ -141,10 +137,10 @@ def save_candidates_s3(df: pl.DataFrame, run_id: str) -> str | None:
 
 
 def save_candidates_iceberg(df: pl.DataFrame) -> None:
-    """Save candidates to Iceberg table (append mode).
+    """Save candidates to Iceberg table (overwrite mode).
 
     Creates table if it doesn't exist.
-    Appends new rows (preserves history for audit trail).
+    Overwrites all rows (deterministic results, no need for history).
     """
     catalog = get_catalog()
 
@@ -164,15 +160,11 @@ def save_candidates_iceberg(df: pl.DataFrame) -> None:
                 ("market", pa.string()),
                 ("ticker_name", pa.string()),
                 # Match context
-                ("sponsor_aliases", pa.list_(pa.string())),
-                ("ticker_aliases", pa.list_(pa.string())),
                 ("match_reason", pa.string()),
                 # Scoring
                 ("confidence", pa.float64()),
                 # Review status
                 ("status", pa.string()),
-                ("approved_by", pa.string()),
-                ("rejected_by", pa.string()),
                 # Timestamps
                 ("created_at", pa.timestamp("us", tz="UTC")),
                 ("reviewed_at", pa.timestamp("us", tz="UTC")),
@@ -184,11 +176,11 @@ def save_candidates_iceberg(df: pl.DataFrame) -> None:
             OUTPUT_TABLE, schema=schema, properties={"format-version": "2"}
         )
 
-    # Convert to Arrow and append
+    # Convert to Arrow and overwrite
     arrow_table = df.to_arrow()
-    table.append(arrow_table)
+    table.overwrite(arrow_table)
 
-    print(f"[load] Appended {len(df)} candidates to {OUTPUT_TABLE}")
+    print(f"[load] Wrote {len(df)} candidates to {OUTPUT_TABLE} (overwrite)")
 
 
 def prepare_output(df: pl.DataFrame, run_id: str) -> pl.DataFrame:

@@ -1,214 +1,232 @@
-"""Tests for entity matching pipeline."""
+"""Tests for entity matching pipeline (embedding-based)."""
 
 import polars as pl
 import pytest
 
-from src.pipelines.entity_match.aliases import parse_aliases_response
-from src.pipelines.entity_match.scoring import score_candidate, score_candidates
+from src.pipelines.entity_match.blocking import build_token_index, tokenize
+from src.pipelines.entity_match.config import (
+    COMMON_TOKENS,
+    CONFIDENCE_AUTO_APPROVE,
+    CONFIDENCE_AUTO_REJECT,
+    STATUS_APPROVED,
+    STATUS_PENDING,
+    STATUS_REJECTED,
+)
 
 
-class TestParseAliasesResponse:
-    """Tests for LLM response parsing."""
+class TestTokenize:
+    """Tests for token extraction."""
 
-    def test_parse_clean_json_array(self):
-        """Parse a clean JSON array of strings."""
-        response = '["GSK", "GlaxoSmithKline", "Glaxo"]'
-        result = parse_aliases_response(response)
-        assert result == ["GSK", "GlaxoSmithKline", "Glaxo"]
+    def test_tokenize_basic(self):
+        """Extract tokens from company name."""
+        tokens = tokenize("Pfizer Inc.")
+        assert "pfizer" in tokens
+        # 'inc' should be filtered as common token
+        assert "inc" not in tokens
 
-    def test_parse_with_surrounding_text(self):
-        """Extract JSON array embedded in other text."""
-        response = 'Here are the aliases: ["GSK", "Glaxo"] Hope this helps!'
-        result = parse_aliases_response(response)
-        assert result == ["GSK", "Glaxo"]
+    def test_tokenize_filters_common_tokens(self):
+        """Common tokens are filtered out."""
+        tokens = tokenize("Global Pharmaceuticals Ltd")
+        assert "global" not in tokens
+        assert "pharmaceuticals" not in tokens
+        assert "ltd" not in tokens
 
-    def test_parse_single_quotes(self):
-        """Handle single-quoted JSON (common LLM error)."""
-        response = "['GSK', 'Glaxo']"
-        result = parse_aliases_response(response)
-        assert result == ["GSK", "Glaxo"]
+    def test_tokenize_keeps_significant_tokens(self):
+        """Significant tokens are kept."""
+        tokens = tokenize("Merck Sharp & Dohme")
+        assert "merck" in tokens
+        assert "sharp" in tokens
+        assert "dohme" in tokens
 
-    def test_parse_invalid_object_syntax(self):
-        """Handle {"GSK"} instead of "GSK" (common LLM error)."""
-        response = '[{"GSK"}, "Glaxo", {"SmithKline"}]'
-        result = parse_aliases_response(response)
-        assert "GSK" in result
-        assert "Glaxo" in result
-        assert "SmithKline" in result
+    def test_tokenize_empty_string(self):
+        """Empty string returns empty set."""
+        assert tokenize("") == set()
 
-    def test_parse_nested_objects(self):
-        """Flatten nested objects like {'alias': 'GSK'}."""
-        response = '[{"alias": "GSK"}, {"ticker": "NVS"}, "Novartis"]'
-        result = parse_aliases_response(response)
-        assert "GSK" in result
-        assert "NVS" in result
-        assert "Novartis" in result
-
-    def test_parse_empty_response(self):
-        """Return empty list for empty response."""
-        assert parse_aliases_response("") == []
-        assert parse_aliases_response("No aliases found.") == []
-
-    def test_parse_empty_array(self):
-        """Parse empty JSON array."""
-        assert parse_aliases_response("[]") == []
-
-    def test_parse_invalid_json(self):
-        """Return empty list for unparseable JSON."""
-        response = "[GSK, Glaxo"  # Missing quotes and bracket
-        result = parse_aliases_response(response)
-        assert result == []
+    def test_tokenize_short_tokens_filtered(self):
+        """Very short tokens are filtered."""
+        tokens = tokenize("AB Corp")
+        # 'ab' is only 2 chars but MIN_TOKEN_LENGTH is 2, so it should be kept
+        # 'corp' is a common token
+        assert "ab" in tokens
+        assert "corp" not in tokens
 
 
-class TestScoring:
-    """Tests for candidate scoring and schema consistency."""
+class TestBuildTokenIndex:
+    """Tests for inverted index building."""
 
-    def test_score_candidate_high_confidence_approved(self):
-        """High confidence match should be auto-approved."""
-        # Identical aliases = high confidence
-        result = score_candidate(
-            sponsor_aliases=["pfizer", "pfe", "pfizer inc"],
-            ticker_aliases=["pfizer", "pfe", "pfizer inc"],
-        )
-        assert result["confidence"] >= 0.9
-        assert result["status"] == "approved"
-        assert result["approved_by"] == "machine"
-        assert result["rejected_by"] is None
-
-    def test_score_candidate_low_confidence_rejected(self):
-        """Low confidence match should be auto-rejected."""
-        # No overlap = low confidence
-        result = score_candidate(
-            sponsor_aliases=["acme corp", "acme"],
-            ticker_aliases=["globex", "gx"],
-        )
-        assert result["confidence"] < 0.5
-        assert result["status"] == "rejected"
-        assert result["approved_by"] is None
-        assert result["rejected_by"] == "machine"
-
-    def test_score_candidate_medium_confidence_pending(self):
-        """Medium confidence match should be pending review."""
-        # Partial overlap = medium confidence
-        result = score_candidate(
-            sponsor_aliases=["pharma corp", "pharma", "pc"],
-            ticker_aliases=["pharma inc", "pharma", "pi"],
-        )
-        assert 0.5 <= result["confidence"] < 0.9
-        assert result["status"] == "pending"
-        assert result["approved_by"] is None
-        assert result["rejected_by"] is None
-
-    def test_score_candidates_mixed_statuses_schema(self):
-        """score_candidates handles mixed statuses without schema errors.
-
-        This is the critical test - Polars schema inference failed when
-        early rows had None for approved_by/rejected_by and later rows
-        had 'machine' strings. The DataFrame creation must use explicit schema.
-        """
-        # Create test DataFrame with candidates that will produce all status types
-        candidates_df = pl.DataFrame(
+    def test_build_token_index(self):
+        """Build inverted index from DataFrame."""
+        df = pl.DataFrame(
             {
-                "sponsor_name": ["A", "B", "C", "D"],
-                "ticker": ["T1", "T2", "T3", "T4"],
-                # High overlap → approved
-                "sponsor_aliases": [
-                    ["exact match", "em"],
-                    ["partial", "match"],
-                    ["no", "overlap"],
-                    ["another", "exact", "test"],
-                ],
-                "ticker_aliases": [
-                    ["exact match", "em"],  # Will be approved (high confidence)
-                    ["partial", "different"],  # Will be pending (medium confidence)
-                    ["completely", "different"],  # Will be rejected (low confidence)
-                    ["another", "exact", "test"],  # Will be approved
-                ],
+                "ticker": ["AAPL", "MSFT", "GOOG"],
+                "name": ["Apple Inc.", "Microsoft Corporation", "Alphabet Inc."],
             }
         )
 
-        # This should NOT raise a schema error
-        result = score_candidates(candidates_df)
+        index = build_token_index(df, key_col="ticker", text_col="name")
 
-        # Verify schema
-        assert "confidence" in result.columns
-        assert "status" in result.columns
-        assert "approved_by" in result.columns
-        assert "rejected_by" in result.columns
+        assert "apple" in index
+        assert "AAPL" in index["apple"]
 
-        # Verify we got mixed statuses
-        statuses = result["status"].to_list()
-        assert "approved" in statuses or "rejected" in statuses  # At least one decision
-        assert len(result) == 4
+        assert "microsoft" in index
+        assert "MSFT" in index["microsoft"]
 
-    def test_score_candidates_empty_input(self):
-        """Handle empty candidate DataFrame gracefully."""
-        empty_df = pl.DataFrame(
+        assert "alphabet" in index
+        assert "GOOG" in index["alphabet"]
+
+    def test_build_token_index_multiple_matches(self):
+        """Token can map to multiple entities."""
+        df = pl.DataFrame(
             {
-                "sponsor_name": [],
-                "ticker": [],
-                "sponsor_aliases": [],
-                "ticker_aliases": [],
+                "ticker": ["AMGN", "BIIB"],
+                "name": ["Amgen Biotech", "Biogen Biotech"],  # Both have 'biotech'
             }
         )
 
-        result = score_candidates(empty_df)
-        assert len(result) == 0
+        index = build_token_index(df, key_col="ticker", text_col="name")
 
-    def test_score_candidates_all_rejected_schema(self):
-        """Schema works when all rows are rejected (all have rejected_by='machine')."""
-        # All low-confidence matches
-        candidates_df = pl.DataFrame(
+        # 'biotech' is a common token and should be filtered
+        assert "biotech" not in index
+
+        # But the unique tokens should work
+        assert "amgen" in index
+        assert "biogen" in index
+
+
+class TestConfig:
+    """Tests for configuration values."""
+
+    def test_thresholds_ordered(self):
+        """Confidence thresholds are properly ordered."""
+        assert CONFIDENCE_AUTO_REJECT < CONFIDENCE_AUTO_APPROVE
+        assert 0 < CONFIDENCE_AUTO_REJECT < 1
+        assert 0 < CONFIDENCE_AUTO_APPROVE <= 1
+
+    def test_common_tokens_lowercase(self):
+        """All common tokens are lowercase."""
+        for token in COMMON_TOKENS:
+            assert token == token.lower(), f"Token '{token}' should be lowercase"
+
+    def test_status_values(self):
+        """Status values are correct strings."""
+        assert STATUS_APPROVED == "approved"
+        assert STATUS_PENDING == "pending"
+        assert STATUS_REJECTED == "rejected"
+
+
+class TestMainPipeline:
+    """Integration tests for the main pipeline functions."""
+
+    def test_select_best_matches_greedy(self):
+        """Best matches uses greedy 1:1 assignment."""
+        from src.pipelines.entity_match.main import select_best_matches
+
+        # Create candidates where sponsor A matches both T1 (0.9) and T2 (0.8)
+        # and sponsor B matches both T1 (0.85) and T2 (0.7)
+        # Greedy should assign: A→T1 (best), then B→T2 (T1 taken)
+        df = pl.DataFrame(
             {
-                "sponsor_name": ["A", "B", "C"],
-                "ticker": ["T1", "T2", "T3"],
-                "sponsor_aliases": [["x"], ["y"], ["z"]],
-                "ticker_aliases": [["a"], ["b"], ["c"]],
+                "sponsor_name": ["A", "A", "B", "B"],
+                "ticker": ["T1", "T2", "T1", "T2"],
+                "confidence": [0.9, 0.8, 0.85, 0.7],
             }
         )
 
-        result = score_candidates(candidates_df)
-        assert all(s == "rejected" for s in result["status"].to_list())
-        assert all(r == "machine" for r in result["rejected_by"].to_list())
+        result = select_best_matches(df, min_confidence=0.0)
+
+        assert len(result) == 2
+        pairs = set(zip(result["sponsor_name"].to_list(), result["ticker"].to_list()))
+        assert ("A", "T1") in pairs  # Best match overall
+        assert ("B", "T2") in pairs  # B's only option after T1 taken
+
+    def test_select_best_matches_respects_min_confidence(self):
+        """Matches below min_confidence are excluded."""
+        from src.pipelines.entity_match.main import select_best_matches
+
+        df = pl.DataFrame(
+            {
+                "sponsor_name": ["A", "B"],
+                "ticker": ["T1", "T2"],
+                "confidence": [0.9, 0.3],  # B is below threshold
+            }
+        )
+
+        result = select_best_matches(df, min_confidence=0.5)
+
+        assert len(result) == 1
+        assert result["sponsor_name"][0] == "A"
+
+    def test_generate_all_pairs(self):
+        """Generate all pairs without blocking."""
+        from src.pipelines.entity_match.main import generate_all_pairs
+
+        left_df = pl.DataFrame({"sponsor_name": ["A", "B"]})
+        right_df = pl.DataFrame({"ticker": ["T1", "T2", "T3"]})
+
+        pairs = generate_all_pairs(left_df, right_df)
+
+        assert len(pairs) == 2  # Two sponsors
+        assert pairs["A"] == {"T1", "T2", "T3"}
+        assert pairs["B"] == {"T1", "T2", "T3"}
 
 
-class TestGenerateAliases:
-    """Integration tests for alias generation (require Ollama running)."""
+class TestEmbeddings:
+    """Tests for embedding functions (require sentence-transformers)."""
 
     @pytest.fixture
-    def ollama_available(self):
-        """Check if Ollama is available for integration tests."""
-        from src.pipelines.entity_match.aliases import check_ollama_available
+    def model_available(self):
+        """Check if sentence-transformers can be loaded."""
+        import importlib.util
 
-        if not check_ollama_available():
-            pytest.skip("Ollama not available - start with: ollama serve")
+        if importlib.util.find_spec("sentence_transformers") is None:
+            pytest.skip("sentence-transformers not installed")
 
-    def test_generate_aliases_returns_list(self, ollama_available):
-        """Alias generation returns a list of strings."""
-        from src.pipelines.entity_match.aliases import generate_aliases
+    def test_compute_embeddings_shape(self, model_available):
+        """Embeddings have correct shape."""
+        from src.pipelines.entity_match.main import compute_embeddings
 
-        # Use a well-known company with description for consistent results
-        result = generate_aliases(
-            "Pfizer Inc.",
-            "Pfizer Inc. discovers, develops, manufactures, and sells biopharmaceutical products worldwide.",
-            backend="ollama",
-        )
+        texts = ["Hello world", "Test text"]
+        embeddings = compute_embeddings(texts, show_progress=False)
 
-        assert isinstance(result, list)
-        # LLM output is non-deterministic, but should usually return something
-        assert all(isinstance(a, str) for a in result)
+        assert embeddings.shape[0] == 2  # Two texts
+        assert embeddings.shape[1] == 384  # all-MiniLM-L6-v2 dimension
 
-    def test_generate_aliases_known_company(self, ollama_available):
-        """Known company gets relevant aliases."""
-        from src.pipelines.entity_match.aliases import generate_aliases
+    def test_compute_embeddings_normalized(self, model_available):
+        """Embeddings are L2 normalized."""
+        import numpy as np
 
-        result = generate_aliases(
-            "Johnson & Johnson",
-            "Johnson & Johnson researches, develops, manufactures healthcare products.",
-            backend="ollama",
-        )
+        from src.pipelines.entity_match.main import compute_embeddings
 
-        # Should get at least the ticker or common abbreviation
-        aliases_lower = [a.lower() for a in result]
-        has_relevant = any(term in " ".join(aliases_lower) for term in ["jnj", "j&j", "johnson"])
-        assert has_relevant, f"Expected relevant alias, got: {result}"
+        texts = ["Test"]
+        embeddings = compute_embeddings(texts, show_progress=False)
+
+        # L2 norm should be ~1.0
+        norm = np.linalg.norm(embeddings[0])
+        assert abs(norm - 1.0) < 0.001
+
+    def test_similar_texts_high_similarity(self, model_available):
+        """Similar texts have high cosine similarity."""
+        import numpy as np
+
+        from src.pipelines.entity_match.main import compute_embeddings
+
+        texts = ["Pfizer Inc.", "Pfizer Corporation"]
+        embeddings = compute_embeddings(texts, show_progress=False)
+
+        # Cosine similarity (normalized, so just dot product)
+        similarity = np.dot(embeddings[0], embeddings[1])
+
+        assert similarity > 0.8  # Should be very similar
+
+    def test_different_texts_lower_similarity(self, model_available):
+        """Different texts have lower similarity."""
+        import numpy as np
+
+        from src.pipelines.entity_match.main import compute_embeddings
+
+        texts = ["Pfizer Inc.", "Apple Computer"]
+        embeddings = compute_embeddings(texts, show_progress=False)
+
+        similarity = np.dot(embeddings[0], embeddings[1])
+
+        assert similarity < 0.5  # Should be quite different

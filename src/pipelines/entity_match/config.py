@@ -3,18 +3,16 @@
 Defines thresholds, table names, and blocking rules.
 Currently specific to sponsor↔ticker matching.
 
-Future generalization note:
-    To make this a generic entity matcher, parameterize:
-    - Source tables and columns
-    - Entity columns to match on
-    - Output table name
+Matching approach: sentence-transformer embeddings with cosine similarity.
+Thresholds calibrated for all-MiniLM-L6-v2 model.
 """
 
-# Confidence thresholds
-CONFIDENCE_AUTO_APPROVE = 0.90  # Machine auto-approves above this
-CONFIDENCE_AUTO_REJECT = 0.50  # Machine auto-rejects below this
-CONFIDENCE_REVIEW_LOW = 0.50  # Lower bound for human review
-CONFIDENCE_REVIEW_HIGH = 0.90  # Upper bound for human review
+# Confidence thresholds (for embedding cosine similarity)
+# These are lower than traditional string matching because embeddings
+# capture semantic relatedness, not just lexical similarity
+CONFIDENCE_AUTO_APPROVE = 0.85  # High confidence - auto-approve
+CONFIDENCE_AUTO_REJECT = 0.65  # Low confidence - auto-reject
+# Range 0.65-0.85 = pending human review
 
 # Status values
 STATUS_PENDING = "pending"
@@ -24,10 +22,10 @@ STATUS_REJECTED = "rejected"
 # Output table
 OUTPUT_TABLE = "matching.sponsor_ticker_candidates"
 
-# Blocking configuration
+# Blocking configuration (token-based pre-filter)
 MIN_TOKEN_LENGTH = 2  # Ignore tokens shorter than this
 COMMON_TOKENS = {
-    # Legal suffixes to ignore in blocking (but keep for scoring)
+    # Legal suffixes to ignore in blocking
     "inc",
     "corp",
     "corporation",
@@ -43,6 +41,7 @@ COMMON_TOKENS = {
     "co",
     "company",
     "companies",
+    # Industry terms (too common in this domain)
     "pharmaceutical",
     "pharmaceuticals",
     "pharma",
@@ -57,6 +56,7 @@ COMMON_TOKENS = {
     "medical",
     "sciences",
     "science",
+    # Generic business terms
     "international",
     "global",
     "group",

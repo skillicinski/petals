@@ -75,77 +75,18 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for system diagram.
 - `has_results` boolean indicates whether study results have been posted
 - `completion_date` and `primary_completion_date` are returned in mixed formats in API responses: full dates (`2024-08-06`) or year-month only (`2011-01`). We normalize year-month values to first-of-month (`2011-01` → `2011-01-01`) for consistent date handling and downstream stock price correlation analysis.
 
----
+### matching.sponsor_ticker_candidates
 
-## Entity Matching: Sponsors to Tickers
+**Purpose:** Links clinical trial sponsors to public company tickers using embedding-based similarity matching. Enables cross-domain analysis (e.g., trial completion → stock price correlation).
 
-**Goal:** Link clinical trial sponsors (`clinical.trials.sponsor_name`) to public company tickers (`reference.tickers`) to enable cross-domain analysis (e.g., trial completion → stock price correlation).
+**Primary Key:** `(sponsor_name, ticker)` composite - each sponsor matches at most one ticker.
 
-### Problem Space
+**Change Strategy:** Full replace per run. Each pipeline execution produces a complete set of matches; previous runs are not merged.
 
-Trial sponsors and ticker names don't match exactly:
-- Name variations: "Pfizer Inc" vs "Pfizer" vs "PFIZER INC."
-- Legal suffixes: Inc., Corp., Ltd., PLC, AG, A/S, GmbH, etc.
-- Abbreviations: "GlaxoSmithKline" vs "GSK", "Johnson & Johnson" vs "J&J"
-- ADR naming: European pharma trades under different names as ADRs
-- Private companies: Some major sponsors (e.g., Boehringer Ingelheim) aren't publicly traded
-
-### Exploration Findings (2026-01-30)
-
-Data scale:
-- ~64k unique ticker names, ~10k unique sponsor names
-- ~84k completed INDUSTRY-sponsored trials
-- Only 175 exact matches after basic normalization
-
-Matching pipeline tested:
-1. **Normalization** - lowercase, strip suffixes, handle `&` vs `and`
-2. **Alias lookup** - manual mappings for known variations (GSK, Roche, Bayer)
-3. **Fuzzy matching** - rapidfuzz token_sort_ratio + token_set_ratio
-4. **Confidence tiering** - high (≥90), medium (75-89), low (60-74), none (<60)
-
-Results (1000 sponsor sample):
-- High confidence: 26.7%
-- Medium confidence: 42.7%
-- Low/None: 30.6%
-- **Actionable (high + medium): 69.4%**
-
-The ~43% in medium tier contains both true positives and false positives - this is where additional verification adds value.
-
-### Entity Matching Pipeline
-
-**Status:** Production-ready. Uses LLM-generated aliases for sponsor↔ticker matching.
-
-**Approach:** 
-1. Generate aliases for both sponsors (left) and tickers (right) via LLM
-2. Block candidate pairs via token overlap (reduces O(n×m) comparisons)
-3. Score candidates using Jaccard similarity + fuzzy matching
-4. Auto-approve/reject based on confidence thresholds; flag uncertain matches for review
-
-**Implementation:** `src/pipelines/entity_match/`
-- `extract.py` — fetch distinct sponsors + tickers from S3 Tables
-- `aliases.py` — LLM alias generation (Ollama locally, Bedrock for cloud)
-- `blocking.py` — token overlap candidate generation
-- `scoring.py` — confidence scoring with auto-decision logic
-- `load.py` — output to Parquet/Iceberg with audit columns
-- `config.py` — thresholds (auto-approve ≥90%, auto-reject <50%)
-
-**Local testing:**
-```bash
-ollama serve && ollama pull llama3.2:3b
-
-AWS_PROFILE=personal LLM_BACKEND=ollama LIMIT_SPONSORS=50 LIMIT_TICKERS=150 \
-  python -m src.pipelines.entity_match.main
-```
-
-**Output:** `matching.sponsor_ticker_candidates` table with:
-- `sponsor_name`, `ticker`, `market`, `ticker_name` — entity identifiers
-- `sponsor_aliases`, `ticker_aliases` — for audit/debugging
-- `confidence` — 0-1 match score
-- `status` — 'approved', 'pending', or 'rejected'
-- `approved_by`, `rejected_by` — 'machine' or human identifier
-- `created_at`, `reviewed_at` — timestamps for audit trail
-- `run_id` — pipeline execution ID (for CloudWatch correlation)
-
-**Cloud deployment:** AWS Batch with Bedrock (`meta.llama3-8b-instruct-v1:0`)
-
-**Scheduling:** On-demand only (no automatic schedule). Trigger with `just trigger entity_match false`
+**Design Notes:**
+- Uses sentence-transformer embeddings (`all-MiniLM-L6-v2`) for semantic similarity - deterministic and hallucination-free unlike LLM-based approaches
+- Token-based blocking reduces tens of millions of potential pairs to hundreds of thousands
+- Greedy 1:1 matching ensures each sponsor maps to at most one ticker
+- Three-tier confidence thresholds: ≥0.85 auto-approve, 0.65-0.85 pending review, <0.65 auto-reject
+- `status` column tracks review state: 'approved', 'pending', or 'rejected'
+- Full run completes in ~21 seconds on CPU

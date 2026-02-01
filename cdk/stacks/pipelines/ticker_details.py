@@ -39,7 +39,6 @@ from aws_cdk import aws_stepfunctions as sfn
 from aws_cdk import aws_stepfunctions_tasks as tasks
 from constructs import Construct
 
-
 # Inline Lambda code for checking stale locks
 CHECK_LOCK_LAMBDA_CODE = """
 import boto3
@@ -294,7 +293,9 @@ class TickerDetailsPipelineStack(Stack):
             "ReleaseLockSuccess",
             table=self.state_table,
             key={"pipeline_id": tasks.DynamoAttributeValue.from_string("ticker_details")},
-            update_expression="SET running = :running, last_run_time = :time, last_status = :status",
+            update_expression=(
+                "SET running = :running, last_run_time = :time, last_status = :status"
+            ),
             expression_attribute_values={
                 ":running": tasks.DynamoAttributeValue.from_boolean(False),
                 ":time": tasks.DynamoAttributeValue.from_string(
@@ -311,7 +312,9 @@ class TickerDetailsPipelineStack(Stack):
             "ReleaseLockFailure",
             table=self.state_table,
             key={"pipeline_id": tasks.DynamoAttributeValue.from_string("ticker_details")},
-            update_expression="SET running = :running, last_status = :status, #err = :error, cause = :cause",
+            update_expression=(
+                "SET running = :running, last_status = :status, #err = :error, cause = :cause"
+            ),
             expression_attribute_names={"#err": "error"},
             expression_attribute_values={
                 ":running": tasks.DynamoAttributeValue.from_boolean(False),

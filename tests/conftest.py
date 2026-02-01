@@ -14,10 +14,9 @@ Requirements:
 """
 
 import os
+import re
 import sys
 from pathlib import Path
-
-import re
 
 import boto3
 import pytest

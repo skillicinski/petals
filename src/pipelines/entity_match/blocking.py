@@ -140,6 +140,7 @@ def generate_candidates(
     candidates_df = candidates_df.rename({"aliases": "ticker_aliases"})
 
     print(
-        f"[blocking] Generated {len(candidates_df)} candidate pairs from {len(left_df)} sponsors × {len(right_df)} tickers"
+        f"[blocking] Generated {len(candidates_df)} candidate pairs "
+        f"from {len(left_df)} sponsors × {len(right_df)} tickers"
     )
     return candidates_df
