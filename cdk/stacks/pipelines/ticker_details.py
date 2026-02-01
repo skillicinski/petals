@@ -32,11 +32,52 @@ from aws_cdk import aws_ecs as ecs
 from aws_cdk import aws_events as events
 from aws_cdk import aws_events_targets as targets
 from aws_cdk import aws_iam as iam
+from aws_cdk import aws_lambda as lambda_
 from aws_cdk import aws_logs as logs
 from aws_cdk import aws_secretsmanager as secretsmanager
 from aws_cdk import aws_stepfunctions as sfn
 from aws_cdk import aws_stepfunctions_tasks as tasks
 from constructs import Construct
+
+
+# Inline Lambda code for checking stale locks
+CHECK_LOCK_LAMBDA_CODE = """
+import boto3
+import os
+from datetime import datetime, timedelta, timezone
+
+def handler(event, context):
+    '''Check if pipeline lock is stale (older than max_age_hours).'''
+    dynamodb = boto3.resource('dynamodb')
+    table = dynamodb.Table(os.environ['STATE_TABLE_NAME'])
+    
+    pipeline_id = event.get('pipeline_id', 'ticker_details')
+    max_age_hours = int(os.environ.get('MAX_LOCK_AGE_HOURS', 168))  # 7 days
+    
+    response = table.get_item(Key={'pipeline_id': pipeline_id})
+    item = response.get('Item', {})
+    
+    if not item.get('running', False):
+        return {'locked': False, 'stale': False, 'should_skip': False}
+    
+    lock_acquired_at = item.get('lock_acquired_at')
+    if not lock_acquired_at:
+        # No timestamp = legacy lock, treat as stale
+        return {'locked': True, 'stale': True, 'should_skip': False, 'reason': 'legacy_lock'}
+    
+    acquired = datetime.fromisoformat(lock_acquired_at.replace('Z', '+00:00'))
+    age = datetime.now(timezone.utc) - acquired
+    age_hours = age.total_seconds() / 3600
+    is_stale = age > timedelta(hours=max_age_hours)
+    
+    return {
+        'locked': True,
+        'stale': is_stale,
+        'should_skip': not is_stale,  # Skip only if locked AND not stale
+        'age_hours': round(age_hours, 1),
+        'reason': 'active_lock' if not is_stale else 'stale_lock',
+    }
+"""
 
 
 class TickerDetailsPipelineStack(Stack):
@@ -56,6 +97,25 @@ class TickerDetailsPipelineStack(Stack):
             "PipelineState",
             state_table_arn,
         )
+
+        # =================================================================
+        # Lock Checker Lambda (detects stale locks from crashed jobs)
+        # =================================================================
+        self.check_lock_fn = lambda_.Function(
+            self,
+            "CheckLockFunction",
+            function_name="petals-ticker-details-check-lock",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="index.handler",
+            code=lambda_.Code.from_inline(CHECK_LOCK_LAMBDA_CODE),
+            timeout=Duration.seconds(10),
+            memory_size=128,
+            environment={
+                "STATE_TABLE_NAME": "petals-pipeline-state",
+                "MAX_LOCK_AGE_HOURS": "168",  # 7 days (job timeout is 6 days)
+            },
+        )
+        self.state_table.grant_read_data(self.check_lock_fn)
 
         # =================================================================
         # Secrets (API Key)
@@ -182,33 +242,38 @@ class TickerDetailsPipelineStack(Stack):
         # =================================================================
         # Step Functions State Machine
         # Uses DynamoDB lock to prevent concurrent executions
+        # Lambda checks for stale locks from crashed/timed-out jobs
         # =================================================================
 
-        # Task: Read pipeline state (includes running lock)
-        get_state = tasks.DynamoGetItem(
+        # Task: Check lock status via Lambda (handles stale lock detection)
+        check_lock = tasks.LambdaInvoke(
             self,
-            "GetPipelineState",
-            table=self.state_table,
-            key={"pipeline_id": tasks.DynamoAttributeValue.from_string("ticker_details")},
-            result_path="$.state",
+            "CheckLockStatus",
+            lambda_function=self.check_lock_fn,
+            payload=sfn.TaskInput.from_object({"pipeline_id": "ticker_details"}),
+            result_selector={"lock_status.$": "$.Payload"},
+            result_path="$.lock_check",
         )
 
-        # Skip if already running
+        # Skip if actively running (not stale)
         skip_already_running = sfn.Succeed(
             self,
             "SkipAlreadyRunning",
             comment="Another execution is already running - skipping",
         )
 
-        # Task: Acquire lock (set running=true)
+        # Task: Acquire lock (set running=true with timestamp for stale detection)
         acquire_lock = tasks.DynamoUpdateItem(
             self,
             "AcquireLock",
             table=self.state_table,
             key={"pipeline_id": tasks.DynamoAttributeValue.from_string("ticker_details")},
-            update_expression="SET running = :running",
+            update_expression="SET running = :running, lock_acquired_at = :ts",
             expression_attribute_values={
                 ":running": tasks.DynamoAttributeValue.from_boolean(True),
+                ":ts": tasks.DynamoAttributeValue.from_string(
+                    sfn.JsonPath.string_at("$$.State.EnteredTime")
+                ),
             },
             result_path="$.lock_result",
         )
@@ -277,13 +342,14 @@ class TickerDetailsPipelineStack(Stack):
             result_path="$.error",
         )
 
-        # Check if already running
-        check_running = sfn.Choice(self, "CheckIfRunning")
+        # Check if should skip (locked AND not stale)
+        check_should_skip = sfn.Choice(self, "CheckIfShouldSkip")
 
         # Build state machine definition
-        definition = get_state.next(
-            check_running.when(
-                sfn.Condition.boolean_equals("$.state.Item.running.BOOL", True),
+        # Lambda returns should_skip=true only if locked AND not stale
+        definition = check_lock.next(
+            check_should_skip.when(
+                sfn.Condition.boolean_equals("$.lock_check.lock_status.should_skip", True),
                 skip_already_running,
             ).otherwise(acquire_lock.next(run_batch))
         )

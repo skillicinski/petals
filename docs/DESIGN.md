@@ -24,6 +24,8 @@ Key architectural choices and rationale:
 
 **Shared infrastructure stack** - DynamoDB state table and S3 Tables bucket are shared across pipelines; lifecycle decoupled from individual pipeline stacks.
 
+**Stale lock detection for long-running pipelines** - Pipelines like `ticker_details` that run for many hours use a DynamoDB-based lock to prevent concurrent executions. A Lambda function checks lock age before skipping: if a lock is older than the job timeout (e.g., 7 days for a 6-day job), it's considered stale and the new execution proceeds. This handles cases where a job is killed externally (timeout, spot interruption) without releasing its lock.
+
 See [ARCHITECTURE.md](ARCHITECTURE.md) for system diagram.
 
 ---
