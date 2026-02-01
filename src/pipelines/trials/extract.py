@@ -60,6 +60,7 @@ def _extract_study_fields(study: dict) -> dict:
     # Design
     design_module = protocol.get("designModule", {})
     enrollment = design_module.get("enrollmentInfo", {})
+    phases = design_module.get("phases", [])
 
     # Conditions and interventions
     conditions_module = protocol.get("conditionsModule", {})
@@ -84,6 +85,7 @@ def _extract_study_fields(study: dict) -> dict:
         "completion_date_type": completion.get("type"),
         "primary_completion_date": _normalize_date(primary_completion.get("date")),
         "study_type": design_module.get("studyType"),
+        "phases": json.dumps(phases) if phases else None,
         "enrollment_count": enrollment.get("count"),
         "enrollment_type": enrollment.get("type"),
         "has_results": study.get("hasResults", False),

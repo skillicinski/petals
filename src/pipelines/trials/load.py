@@ -26,6 +26,7 @@ STUDY_SCHEMA = Schema(
     NestedField(10, "completion_date_type", StringType(), required=False),
     NestedField(11, "primary_completion_date", StringType(), required=False),
     NestedField(12, "study_type", StringType(), required=False),
+    NestedField(20, "phases", StringType(), required=False),  # JSON array
     NestedField(13, "enrollment_count", IntegerType(), required=False),
     NestedField(14, "enrollment_type", StringType(), required=False),
     NestedField(15, "has_results", BooleanType(), required=False),
@@ -51,6 +52,7 @@ STUDY_ARROW_SCHEMA = pa.schema(
         pa.field("completion_date_type", pa.string(), nullable=True),
         pa.field("primary_completion_date", pa.string(), nullable=True),
         pa.field("study_type", pa.string(), nullable=True),
+        pa.field("phases", pa.string(), nullable=True),
         pa.field("enrollment_count", pa.int32(), nullable=True),
         pa.field("enrollment_type", pa.string(), nullable=True),
         pa.field("has_results", pa.bool_(), nullable=True),
@@ -93,6 +95,42 @@ def ensure_namespace(catalog, namespace: str) -> None:
             print(f"Namespace exists: {namespace}")
         else:
             raise
+
+
+def evolve_schema_if_needed(table, expected_schema: Schema) -> bool:
+    """
+    Add missing columns to table schema (additive evolution only).
+
+    Compares expected schema against current table schema and adds
+    any missing columns. Does not remove or modify existing columns.
+
+    Args:
+        table: PyIceberg table instance
+        expected_schema: The schema we expect (from STUDY_SCHEMA)
+
+    Returns:
+        True if schema was evolved, False if no changes needed
+    """
+    current_field_names = {f.name for f in table.schema().fields}
+    expected_fields = {f.name: f for f in expected_schema.fields}
+
+    missing_fields = [
+        expected_fields[name]
+        for name in expected_fields
+        if name not in current_field_names
+    ]
+
+    if not missing_fields:
+        return False
+
+    log(f"[schema] Evolving schema: adding {len(missing_fields)} column(s)")
+
+    with table.update_schema() as update:
+        for field in missing_fields:
+            log(f"[schema] Adding column: {field.name} ({field.field_type})")
+            update.add_column(field.name, field.field_type, required=field.required)
+
+    return True
 
 
 def studies_to_arrow(studies: list[dict]) -> pa.Table:
@@ -203,6 +241,9 @@ def load_studies(
     try:
         table = catalog.load_table(table_id)
         log(f"[load] Table exists: {table_id}")
+
+        # Evolve schema if new columns were added
+        evolve_schema_if_needed(table, STUDY_SCHEMA)
 
         num_batches = (deduped_count + batch_size - 1) // batch_size
         log(f"[load] Will process {num_batches} batches of up to {batch_size} rows")
