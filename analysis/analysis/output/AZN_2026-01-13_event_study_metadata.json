@@ -1,0 +1,22 @@
+{
+  "ticker": "AZN",
+  "company_name": "AstraZeneca PLC",
+  "event_date": "2026-01-13",
+  "event_window_days": 30,
+  "trial": {
+    "nct_id": "NCT06103877",
+    "phase": "PHASE1",
+    "enrollment_count": 108,
+    "enrollment_type": "ACTUAL",
+    "study_type": "INTERVENTIONAL",
+    "conditions": [
+      "Healthy Volunteers"
+    ],
+    "has_results": false,
+    "brief_title": "A Placebo-controlled Safety and Tolerability Study of Intravenous (IV) and Subcutaneous (SC) AZD1163 in Healthy Volunteers",
+    "official_title": "A Phase I, Randomized, Double-blind, Placebo-controlled, Study to Evaluate the Safety, Tolerability, Pharmacokinetics, and Immunogenicity of AZD1163 Administered as Single and Multiple Ascending Doses in Healthy Volunteers",
+    "sponsor": "AstraZeneca",
+    "primary_completion_date": "2026-01-13",
+    "completion_date": "2026-01-13"
+  }
+}
