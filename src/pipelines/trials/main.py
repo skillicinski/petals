@@ -116,6 +116,7 @@ def run(
         studies,
         table_bucket_arn=table_bucket_arn,
         region=region,
+        force_full=force_full,
     )
 
     log(f"[main] Done! {result['rows_inserted']} inserted, {result['rows_updated']} updated")

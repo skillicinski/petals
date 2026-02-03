@@ -97,40 +97,32 @@ def ensure_namespace(catalog, namespace: str) -> None:
             raise
 
 
-def evolve_schema_if_needed(table, expected_schema: Schema) -> bool:
+def check_schema_compatible(table, expected_schema: Schema) -> None:
     """
-    Add missing columns to table schema (additive evolution only).
+    Check if table schema matches expected schema.
 
-    Compares expected schema against current table schema and adds
-    any missing columns. Does not remove or modify existing columns.
+    PyIceberg's upsert has a bug (#2467) where it fails when data files
+    have a different schema than the incoming data. Schema evolution
+    updates metadata but doesn't rewrite data files, so upserts fail.
 
-    Args:
-        table: PyIceberg table instance
-        expected_schema: The schema we expect (from STUDY_SCHEMA)
-
-    Returns:
-        True if schema was evolved, False if no changes needed
+    If schemas don't match, raise an error instructing to use force_full.
     """
     current_field_names = {f.name for f in table.schema().fields}
-    expected_fields = {f.name: f for f in expected_schema.fields}
+    expected_field_names = {f.name for f in expected_schema.fields}
 
-    missing_fields = [
-        expected_fields[name]
-        for name in expected_fields
-        if name not in current_field_names
-    ]
+    missing = expected_field_names - current_field_names
+    extra = current_field_names - expected_field_names
 
-    if not missing_fields:
-        return False
-
-    log(f"[schema] Evolving schema: adding {len(missing_fields)} column(s)")
-
-    with table.update_schema() as update:
-        for field in missing_fields:
-            log(f"[schema] Adding column: {field.name} ({field.field_type})")
-            update.add_column(field.name, field.field_type, required=field.required)
-
-    return True
+    if missing or extra:
+        msg = "[schema] Schema mismatch detected!\n"
+        if missing:
+            msg += f"  Missing columns in table: {missing}\n"
+        if extra:
+            msg += f"  Extra columns in table: {extra}\n"
+        msg += "  PyIceberg upsert cannot handle schema changes (issue #2467).\n"
+        msg += "  Re-run with force_full=true to rebuild the table."
+        log(msg)
+        raise ValueError(msg)
 
 
 def studies_to_arrow(studies: list[dict]) -> pa.Table:
@@ -188,6 +180,7 @@ def load_studies(
     table_name: str = "trials",
     region: str = "us-east-1",
     batch_size: int = 5000,
+    force_full: bool = False,
 ) -> dict:
     """
     Load studies to S3 Tables Iceberg table using upsert.
@@ -242,8 +235,14 @@ def load_studies(
         table = catalog.load_table(table_id)
         log(f"[load] Table exists: {table_id}")
 
-        # Evolve schema if new columns were added
-        evolve_schema_if_needed(table, STUDY_SCHEMA)
+        # For force_full, drop and recreate the table to ensure clean schema
+        if force_full:
+            log("[load] force_full=True, dropping table for fresh load...")
+            catalog.drop_table(table_id, purge_requested=True)
+            raise NoSuchTableError(table_id)  # Fall through to create branch
+
+        # Check schema compatibility (pyiceberg upsert can't handle mismatches)
+        check_schema_compatible(table, STUDY_SCHEMA)
 
         num_batches = (deduped_count + batch_size - 1) // batch_size
         log(f"[load] Will process {num_batches} batches of up to {batch_size} rows")
