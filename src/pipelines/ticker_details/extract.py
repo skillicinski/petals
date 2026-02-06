@@ -14,6 +14,12 @@ Incremental Fetching
 ====================
 For incremental runs, we only fetch details for tickers that have been
 updated since the last run (based on last_updated_utc from tickers table).
+
+404 Handling
+============
+When the API returns 404 (ticker not found), we write a minimal record with
+only ticker, market, and last_fetched_utc. This prevents re-attempting the
+same 404s on future runs, significantly reducing wasted API calls.
 """
 
 import json
@@ -126,6 +132,9 @@ def fetch_ticker_details_batch(
     """
     Fetch details for a batch of tickers, respecting rate limits.
 
+    Always yields a record for each ticker (even on 404) so that future runs
+    can skip tickers where the API has no details available.
+
     Args:
         tickers: List of (ticker, market) tuples to fetch
         api_key: Massive API key
@@ -134,7 +143,7 @@ def fetch_ticker_details_batch(
         progress_interval: How often to log progress
 
     Yields:
-        Dict with ticker details for each successful fetch
+        Dict with ticker details (or minimal record with only ticker/market/last_fetched_utc on 404)
     """
     total = len(tickers)
     fetched = 0
@@ -143,6 +152,7 @@ def fetch_ticker_details_batch(
     print(f"Fetching details for {total} tickers...")
     print(f"Rate limit delay: {rate_limit_delay}s between requests")
     print(f"Estimated time: {total * rate_limit_delay / 3600:.1f} hours")
+    print("Note: All tickers get a record (even 404s) to optimize future runs")
 
     for i, (ticker, market) in enumerate(tickers):
         if i > 0:
@@ -154,16 +164,39 @@ def fetch_ticker_details_batch(
             yield _extract_detail_fields(ticker, market, details)
             fetched += 1
         else:
+            # Yield minimal record (404/not found) so we skip this ticker on future runs
+            yield {
+                "ticker": ticker,
+                "market": market,
+                "name": None,
+                "sic_code": None,
+                "sic_description": None,
+                "description": None,
+                "homepage_url": None,
+                "market_cap": None,
+                "total_employees": None,
+                "list_date": None,
+                "locale": None,
+                "primary_exchange": None,
+                "currency_name": None,
+                "cik": None,
+                "composite_figi": None,
+                "share_class_figi": None,
+                "address_city": None,
+                "address_state": None,
+                "address_country": None,
+                "last_fetched_utc": datetime.utcnow().isoformat() + "Z",
+            }
             skipped += 1
 
         if (i + 1) % progress_interval == 0 or i == total - 1:
             elapsed_pct = 100 * (i + 1) / total
             print(
                 f"Progress: {i + 1}/{total} ({elapsed_pct:.1f}%) "
-                f"- fetched: {fetched}, skipped: {skipped}"
+                f"- with details: {fetched}, no details (404): {skipped}"
             )
 
-    print(f"Fetch complete: {fetched} fetched, {skipped} skipped")
+    print(f"Fetch complete: {fetched} with details, {skipped} not found (404s)")
 
 
 if __name__ == "__main__":

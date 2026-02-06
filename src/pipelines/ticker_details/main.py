@@ -102,19 +102,37 @@ def get_tickers_to_enrich(
         )
         log(f"[main] Existing ticker_details records: {len(details_df):,}")
 
+        if len(details_df) == 0:
+            log(
+                "[main] ticker_details is empty; will enrich all US tickers "
+                "(first run or table was recreated)"
+            )
+
+        # One row per (ticker, market): keep latest last_fetched_utc in case of duplicates
+        details_df = details_df.group_by(["ticker", "market"]).agg(
+            pl.col("last_fetched_utc").max().alias("last_fetched_utc")
+        )
+
         # Left join tickers with details
         tickers_df = tickers_df.join(details_df, on=["ticker", "market"], how="left")
+
+        # Compare as strings so type drift (e.g. timestamp vs string) doesn't break the filter
+        last_updated_str = pl.col("last_updated_utc").cast(pl.Utf8)
+        last_fetched_str = pl.col("last_fetched_utc").cast(pl.Utf8)
 
         # Keep tickers where:
         # - No details exist (last_fetched_utc is null), OR
         # - Ticker updated after details were fetched
         before_count = len(tickers_df)
         tickers_df = tickers_df.filter(
-            pl.col("last_fetched_utc").is_null()
-            | (pl.col("last_updated_utc") > pl.col("last_fetched_utc"))
+            pl.col("last_fetched_utc").is_null() | (last_updated_str > last_fetched_str)
         )
         skipped = before_count - len(tickers_df)
         log(f"[main] Skipping {skipped:,} tickers with up-to-date details")
+    else:
+        log(
+            "[main] ticker_details table not found; will enrich all US tickers (table_exists=False)"
+        )
 
     # Extract (ticker, market) tuples
     result = [
