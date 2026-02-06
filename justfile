@@ -31,6 +31,7 @@ health:
     pipelines=(
         "tickers|reference|tickers|1"
         "ticker_details|reference|ticker_details|1"
+        "ticker_prices|market_data|ticker_prices|1"
         "trials|clinical|trials|1"
         "entity_match|matching|sponsor_ticker_candidates|0"
     )
@@ -162,6 +163,17 @@ build-base:
     docker tag petals-base:latest "$ECR_URI/{{ecr_base_repo}}:latest"
     docker push "$ECR_URI/{{ecr_base_repo}}:latest"
     
+    echo "Cleaning up old base images..."
+    # Remove dangling images from this build
+    docker image prune -f >/dev/null 2>&1 || true
+    
+    # Show any old petals-base images (user can manually prune if needed)
+    OLD_IMAGES=$(docker images petals-base --format "{{{{.ID}}}} {{{{.CreatedAt}}}}" | tail -n +2 || echo "")
+    if [ -n "$OLD_IMAGES" ]; then
+        echo "Note: Found old petals-base images (run 'docker image prune -a' to clean):"
+        echo "$OLD_IMAGES" | head -3
+    fi
+    
     echo "✓ Base image updated"
 
 # Full deploy: sync → format → test → build → push → cdk deploy
@@ -286,7 +298,8 @@ logs pipeline="tickers" n="50":
         --log-group-name /petals/pipelines/{{pipeline}} \
         --profile {{profile}} \
         --region {{region}} \
-        --start-time $(($(date +%s) * 1000 - 7 * 24 * 60 * 60 * 1000)) \
+        --start-time $(($(date +%s) * 1000 - 24 * 60 * 60 * 1000)) \
+        --max-items 200 \
         --output json \
     | jq -r '[.events[] | {ts: .timestamp, msg: "\(.timestamp / 1000 | strftime("%Y-%m-%d %H:%M:%S")) \(.message)"}] | sort_by(.ts) | .[-{{n}}:] | .[].msg'
 

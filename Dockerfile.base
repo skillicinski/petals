@@ -19,8 +19,9 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-editable \
     --extra-index-url https://download.pytorch.org/whl/cpu
 
-# Pre-download the embedding model
+# Pre-download the embedding model (best effort - will download on first use if this fails)
 ENV PATH="/app/.venv/bin:$PATH"
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+RUN mkdir -p /tmp /var/tmp && chmod 1777 /tmp /var/tmp && \
+    (TMPDIR=/tmp TORCH_HOME=/app/.cache python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')" || echo "Model will be downloaded on first use")
 
 ENV PYTHONUNBUFFERED=1
