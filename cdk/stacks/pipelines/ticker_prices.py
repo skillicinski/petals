@@ -186,7 +186,8 @@ class TickerPricesPipelineStack(Stack):
             "UpdatePipelineState",
             table=self.state_table,
             key={"pipeline_id": tasks.DynamoAttributeValue.from_string("ticker_prices")},
-            update_expression="SET last_run_time = :last_run_time, last_status = :last_status",
+            update_expression="SET last_run_time = :last_run_time, last_status = :last_status REMOVE #err, cause",
+            expression_attribute_names={"#err": "error"},
             expression_attribute_values={
                 ":last_run_time": tasks.DynamoAttributeValue.from_string(
                     sfn.JsonPath.string_at("$$.State.EnteredTime")
