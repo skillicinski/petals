@@ -15,9 +15,11 @@ cdk.out/
 .cursor/
 *.swp
 
-
 # OS
 .DS_Store
+
+# Claude
+.claude/
 
 # Local dev notes
 DEVLOG.md
