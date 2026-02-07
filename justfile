@@ -294,14 +294,26 @@ deploy skip_tests="false":
 
 # Last N log events for a pipeline (timestamp in descending order)
 logs pipeline="tickers" n="50":
-    @aws logs filter-log-events \
+    #!/usr/bin/env bash
+    # Get recent log streams and fetch events from them
+    streams=$(aws logs describe-log-streams \
         --log-group-name /petals/pipelines/{{pipeline}} \
         --profile {{profile}} \
         --region {{region}} \
-        --start-time $(($(date +%s) * 1000 - 24 * 60 * 60 * 1000)) \
-        --max-items 200 \
-        --output json \
-    | jq -r '[.events[] | {ts: .timestamp, msg: "\(.timestamp / 1000 | strftime("%Y-%m-%d %H:%M:%S")) \(.message)"}] | sort_by(.ts) | reverse | .[-{{n}}:] | .[].msg'
+        --order-by LastEventTime \
+        --descending \
+        --max-items 5 \
+        --output json | jq -r '.logStreams[].logStreamName')
+    
+    # Fetch events from recent streams
+    for stream in $streams; do
+        aws logs get-log-events \
+            --log-group-name /petals/pipelines/{{pipeline}} \
+            --log-stream-name "$stream" \
+            --profile {{profile}} \
+            --region {{region}} \
+            --output json | jq -r '.events[] | {ts: .timestamp, msg: "\(.timestamp / 1000 | strftime("%Y-%m-%d %H:%M:%S")) \(.message)"}'
+    done | jq -sr 'sort_by(.ts) | .[-{{n}}:] | reverse | .[].msg'
 
 # Trigger a pipeline (dry-run by default)
 trigger pipeline dry="true":
