@@ -19,10 +19,12 @@ trading day's data. Can be scheduled to run:
 - After market close (4pm ET) to get same-day data
 - In the morning to get previous day's data
 
-Incremental Strategy
-====================
-For daily updates, can optionally filter to only active tickers,
-or fetch all tickers to maintain historical data for delisted stocks.
+No Data Handling
+================
+Tickers without available price data (delisted, thinly traded preferreds)
+are written with null OHLC values. This creates a record preventing wasted
+re-fetch attempts. Historical prices are immutable, so no change detection
+is needed - each run fetches for a specific date.
 """
 
 import os
@@ -59,14 +61,20 @@ def get_catalog(table_bucket_arn: str, region: str = "us-east-1"):
 def get_us_stock_tickers(
     table_bucket_arn: str,
     region: str,
+    date: str,
     active_only: bool = True,
 ) -> list[str]:
     """
-    Get list of US stock tickers from reference.tickers table.
+    Get list of US stock tickers to fetch prices for.
+
+    Filters to tickers that either:
+    - Don't have prices for the target date yet, OR
+    - Have a null close price (no data was available previously)
 
     Args:
         table_bucket_arn: S3 Table Bucket ARN
         region: AWS region
+        date: Target date (YYYY-MM-DD)
         active_only: If True, only return active tickers (default)
 
     Returns:
@@ -85,7 +93,7 @@ def get_us_stock_tickers(
 
     # Optionally filter to active only
     if active_only:
-        tickers_df = tickers_df.filter(pl.col("active") == True)
+        tickers_df = tickers_df.filter(pl.col("active"))
         log(f"[main] Active US stock tickers: {len(tickers_df):,}")
 
     # Extract ticker symbols

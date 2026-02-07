@@ -11,7 +11,7 @@ import pyarrow as pa
 from pyiceberg.catalog import load_catalog
 from pyiceberg.exceptions import NoSuchTableError
 from pyiceberg.schema import Schema
-from pyiceberg.types import DoubleType, IntegerType, LongType, NestedField, StringType
+from pyiceberg.types import DoubleType, LongType, NestedField, StringType
 
 # Schema for ticker prices (OHLC)
 # (ticker, date) composite key

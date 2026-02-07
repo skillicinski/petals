@@ -15,7 +15,12 @@ Performance
 yfinance can handle bulk downloads efficiently:
 - ~100 tickers in parallel takes ~30 seconds
 - Much faster than API rate-limited approaches
-- Can download entire market history in minutes, not days
+
+No Data Handling
+================
+When yfinance returns no data (delisted, thinly traded preferred stocks, etc.),
+we write a minimal record with nulls so future runs skip these tickers rather
+than retrying indefinitely. This saves significant processing time.
 """
 
 import sys
@@ -56,8 +61,9 @@ def fetch_ticker_prices_batch(
     """
     Fetch OHLC price data for a batch of tickers using yfinance.
 
-    Downloads data in parallel batches for efficiency. yfinance handles
-    multiple tickers well and doesn't have strict rate limits.
+    Downloads data in parallel batches for efficiency. Always yields a record
+    for each ticker (even when no data is available) so future runs can skip
+    tickers without recent trading activity.
 
     Args:
         tickers: List of ticker symbols to fetch
@@ -67,6 +73,7 @@ def fetch_ticker_prices_batch(
 
     Yields:
         Dict with ticker, date, open, high, low, close, volume, last_fetched_utc
+        (OHLC fields will be None if no data is available)
     """
     if not date:
         date = get_latest_trading_day()
@@ -74,6 +81,7 @@ def fetch_ticker_prices_batch(
     total = len(tickers)
     log(f"[extract] Fetching OHLC data for {total:,} tickers on {date}")
     log(f"[extract] Batch size: {batch_size} tickers in parallel")
+    log("[extract] Note: All tickers get a record (even when no data) to optimize future runs")
 
     # Calculate date range: fetch just the target date plus a buffer
     # (yfinance needs a range, single day sometimes returns empty)
@@ -115,7 +123,8 @@ def fetch_ticker_prices_batch(
                 if date_mask.any():
                     row_data = data_pd[date_mask].iloc[0]
 
-                    # Handle MultiIndex columns - yfinance with group_by='ticker' returns (ticker, metric)
+                    # Handle MultiIndex columns
+                    # yfinance with group_by='ticker' returns (ticker, metric)
                     if isinstance(data_pd.columns, pd.MultiIndex):
                         # Extract values from MultiIndex tuples (ticker, metric)
                         open_val = (
@@ -174,6 +183,19 @@ def fetch_ticker_prices_batch(
                         }
                     fetched += 1
                 else:
+                    # No data for target date - yield minimal record to skip on future runs
+                    yield {
+                        "ticker": ticker,
+                        "date": date,
+                        "open": None,
+                        "high": None,
+                        "low": None,
+                        "close": None,
+                        "volume": None,
+                        "last_fetched_utc": datetime.now(timezone.utc)
+                        .isoformat()
+                        .replace("+00:00", "Z"),
+                    }
                     no_data += 1
             else:
                 # Multiple tickers - data has MultiIndex columns
@@ -210,21 +232,88 @@ def fetch_ticker_prices_batch(
                                     }
                                     fetched += 1
                                 else:
+                                    # No data for target date - yield minimal record
+                                    yield {
+                                        "ticker": ticker,
+                                        "date": date,
+                                        "open": None,
+                                        "high": None,
+                                        "low": None,
+                                        "close": None,
+                                        "volume": None,
+                                        "last_fetched_utc": datetime.now(timezone.utc)
+                                        .isoformat()
+                                        .replace("+00:00", "Z"),
+                                    }
                                     no_data += 1
                             else:
+                                # Empty dataframe - yield minimal record
+                                yield {
+                                    "ticker": ticker,
+                                    "date": date,
+                                    "open": None,
+                                    "high": None,
+                                    "low": None,
+                                    "close": None,
+                                    "volume": None,
+                                    "last_fetched_utc": datetime.now(timezone.utc)
+                                    .isoformat()
+                                    .replace("+00:00", "Z"),
+                                }
                                 no_data += 1
                         else:
+                            # Ticker not in response - yield minimal record
+                            yield {
+                                "ticker": ticker,
+                                "date": date,
+                                "open": None,
+                                "high": None,
+                                "low": None,
+                                "close": None,
+                                "volume": None,
+                                "last_fetched_utc": datetime.now(timezone.utc)
+                                .isoformat()
+                                .replace("+00:00", "Z"),
+                            }
                             no_data += 1
                     except (KeyError, IndexError, Exception):
+                        # Error processing ticker - yield minimal record
+                        yield {
+                            "ticker": ticker,
+                            "date": date,
+                            "open": None,
+                            "high": None,
+                            "low": None,
+                            "close": None,
+                            "volume": None,
+                            "last_fetched_utc": datetime.now(timezone.utc)
+                            .isoformat()
+                            .replace("+00:00", "Z"),
+                        }
                         no_data += 1
 
         except Exception as e:
             import traceback
 
             log(
-                f"[extract] Error fetching batch {i}-{i + len(batch_tickers)}: {type(e).__name__}: {e}"
+                f"[extract] Error fetching batch {i}-{i + len(batch_tickers)}: "
+                f"{type(e).__name__}: {e}"
             )
             log(f"[extract] Traceback: {traceback.format_exc()}")
+            # Yield minimal records for all tickers in failed batch
+            for ticker in batch_tickers:
+                yield {
+                    "ticker": ticker,
+                    "date": date,
+                    "open": None,
+                    "high": None,
+                    "low": None,
+                    "close": None,
+                    "volume": None,
+                    "last_fetched_utc": datetime.now(timezone.utc)
+                    .isoformat()
+                    .replace("+00:00", "Z"),
+                }
             no_data += len(batch_tickers)
 
         # Log progress
@@ -233,7 +322,7 @@ def fetch_ticker_prices_batch(
             pct = 100 * processed / total
             log(
                 f"[extract] Progress: {processed:,}/{total:,} ({pct:.1f}%) "
-                f"- fetched: {fetched:,}, no data: {no_data:,}"
+                f"- with data: {fetched:,}, no data: {no_data:,}"
             )
 
     log(f"[extract] Fetch complete: {fetched:,} with data, {no_data:,} no data")
