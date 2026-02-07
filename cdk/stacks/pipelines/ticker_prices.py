@@ -186,7 +186,10 @@ class TickerPricesPipelineStack(Stack):
             "UpdatePipelineState",
             table=self.state_table,
             key={"pipeline_id": tasks.DynamoAttributeValue.from_string("ticker_prices")},
-            update_expression="SET last_run_time = :last_run_time, last_status = :last_status REMOVE #err, cause",
+            update_expression=(
+                "SET last_run_time = :last_run_time, last_status = :last_status "
+                "REMOVE #err, cause"
+            ),
             expression_attribute_names={"#err": "error"},
             expression_attribute_values={
                 ":last_run_time": tasks.DynamoAttributeValue.from_string(
@@ -250,9 +253,10 @@ class TickerPricesPipelineStack(Stack):
         self.state_table.grant_read_write_data(self.state_machine)
 
         # =================================================================
-        # EventBridge Schedule (daily after market close)
+        # EventBridge Schedule (daily in the morning UTC)
         # US market closes at 4 PM ET (9 PM UTC)
-        # Run at 11 PM UTC (6 PM ET) to ensure market data is settled
+        # Run at 7 AM UTC (8 AM CET Stockholm) - previous day's data is complete
+        # Pipeline defaults to fetching yesterday's data, so this is optimal
         # =================================================================
         self.schedule_rule = events.Rule(
             self,
@@ -260,7 +264,7 @@ class TickerPricesPipelineStack(Stack):
             rule_name="petals-ticker-prices-daily",
             schedule=events.Schedule.cron(
                 minute="0",
-                hour="23",  # 11 PM UTC = 6 PM ET
+                hour="7",  # 7 AM UTC = 8 AM CET (Stockholm winter)
                 month="*",
                 week_day="MON-FRI",  # Only run on trading days
                 year="*",
