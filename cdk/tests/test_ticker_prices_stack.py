@@ -125,11 +125,11 @@ class TestEventBridgeSchedule:
             {"Name": "petals-ticker-prices-daily"},
         )
 
-    def test_schedule_is_weekdays_11pm_utc(self, template):
-        """Schedule runs weekdays at 11 PM UTC (6 PM ET, after market close)."""
+    def test_schedule_is_weekdays_7am_utc(self, template):
+        """Schedule runs weekdays at 7 AM UTC (8 AM Stockholm time)."""
         template.has_resource_properties(
             "AWS::Events::Rule",
-            {"ScheduleExpression": "cron(0 23 ? * MON-FRI *)"},
+            {"ScheduleExpression": "cron(0 7 ? * MON-FRI *)"},
         )
 
 
