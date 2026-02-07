@@ -146,6 +146,7 @@ def run(
     tickers = get_us_stock_tickers(
         table_bucket_arn=table_bucket_arn,
         region=region,
+        date=date,
         active_only=active_only,
     )
 
