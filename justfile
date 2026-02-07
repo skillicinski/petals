@@ -292,7 +292,7 @@ deploy skip_tests="false":
 # Operations
 # =============================================================================
 
-# Last N log events for a pipeline (chronological order)
+# Last N log events for a pipeline (timestamp in descending order)
 logs pipeline="tickers" n="50":
     @aws logs filter-log-events \
         --log-group-name /petals/pipelines/{{pipeline}} \
@@ -301,7 +301,7 @@ logs pipeline="tickers" n="50":
         --start-time $(($(date +%s) * 1000 - 24 * 60 * 60 * 1000)) \
         --max-items 200 \
         --output json \
-    | jq -r '[.events[] | {ts: .timestamp, msg: "\(.timestamp / 1000 | strftime("%Y-%m-%d %H:%M:%S")) \(.message)"}] | sort_by(.ts) | .[-{{n}}:] | .[].msg'
+    | jq -r '[.events[] | {ts: .timestamp, msg: "\(.timestamp / 1000 | strftime("%Y-%m-%d %H:%M:%S")) \(.message)"}] | sort_by(.ts) | reverse | .[-{{n}}:] | .[].msg'
 
 # Trigger a pipeline (dry-run by default)
 trigger pipeline dry="true":

@@ -187,8 +187,7 @@ class TickerPricesPipelineStack(Stack):
             table=self.state_table,
             key={"pipeline_id": tasks.DynamoAttributeValue.from_string("ticker_prices")},
             update_expression=(
-                "SET last_run_time = :last_run_time, last_status = :last_status "
-                "REMOVE #err, cause"
+                "SET last_run_time = :last_run_time, last_status = :last_status REMOVE #err, cause"
             ),
             expression_attribute_names={"#err": "error"},
             expression_attribute_values={

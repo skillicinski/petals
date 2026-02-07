@@ -102,7 +102,7 @@ class TestFetchTickerPricesBatch:
             # last_fetched_utc should be ISO format with Z
             assert isinstance(price["last_fetched_utc"], str)
             assert price["last_fetched_utc"].endswith("Z")
-            
+
             # market and locale should be strings
             assert isinstance(price["market"], str)
             assert isinstance(price["locale"], str)
@@ -258,7 +258,7 @@ class TestSchemaEvolution:
             NestedField(2, "date", StringType(), required=True),
             NestedField(3, "close", DoubleType(), required=False),
         )
-        
+
         # Target schema with new field
         new_schema = Schema(
             NestedField(1, "ticker", StringType(), required=True),
@@ -266,19 +266,21 @@ class TestSchemaEvolution:
             NestedField(3, "close", DoubleType(), required=False),
             NestedField(4, "market", StringType(), required=False),
         )
-        
-        # Mock table
+
+        # Mock catalog and table
+        mock_catalog = MagicMock()
         mock_table = MagicMock()
         mock_table.schema.return_value = old_schema
-        
+        mock_catalog.load_table.return_value = mock_table
+
         # Mock update_schema context manager
         mock_update = MagicMock()
         mock_table.update_schema.return_value.__enter__.return_value = mock_update
         mock_table.update_schema.return_value.__exit__.return_value = None
-        
+
         # Run evolution
-        evolve_schema(mock_table, new_schema)
-        
+        evolve_schema(mock_catalog, "namespace.table", new_schema)
+
         # Verify add_column was called for the missing field
         mock_update.add_column.assert_called_once()
         call_args = mock_update.add_column.call_args
@@ -297,13 +299,15 @@ class TestSchemaEvolution:
             NestedField(1, "ticker", StringType(), required=True),
             NestedField(2, "date", StringType(), required=True),
         )
-        
+
+        mock_catalog = MagicMock()
         mock_table = MagicMock()
         mock_table.schema.return_value = schema
-        
+        mock_catalog.load_table.return_value = mock_table
+
         # Run evolution
-        evolve_schema(mock_table, schema)
-        
+        evolve_schema(mock_catalog, "namespace.table", schema)
+
         # Verify update_schema was never called
         mock_table.update_schema.assert_not_called()
 

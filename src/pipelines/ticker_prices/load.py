@@ -24,8 +24,8 @@ TICKER_PRICES_SCHEMA = Schema(
     NestedField(6, "close", DoubleType(), required=False),
     NestedField(7, "volume", LongType(), required=False),
     NestedField(8, "last_fetched_utc", StringType(), required=False),
-    NestedField(9, "market", StringType(), required=False),
     NestedField(10, "locale", StringType(), required=False),
+    NestedField(9, "market", StringType(), required=False),
     identifier_field_ids=[1, 2],
 )
 
@@ -40,8 +40,8 @@ TICKER_PRICES_ARROW_SCHEMA = pa.schema(
         pa.field("close", pa.float64(), nullable=True),
         pa.field("volume", pa.int64(), nullable=True),
         pa.field("last_fetched_utc", pa.string(), nullable=True),
-        pa.field("market", pa.string(), nullable=True),
         pa.field("locale", pa.string(), nullable=True),
+        pa.field("market", pa.string(), nullable=True),
     ]
 )
 
@@ -85,48 +85,59 @@ def ensure_namespace(catalog, namespace: str) -> None:
             raise
 
 
-def evolve_schema(table, target_schema: Schema) -> None:
+def evolve_schema(
+    catalog, table_id: str, target_schema: Schema
+) -> None:
     """
     Evolve table schema to match target schema by adding missing columns.
-    
+
     Uses PyIceberg's schema evolution API to add columns that exist in the
     target schema but not in the current table schema.
-    
+
+    Note: Due to Iceberg's MVCC, we reload the table fresh from catalog after evolution
+    to ensure we get the updated metadata version.
+
     Args:
-        table: PyIceberg table instance
+        catalog: PyIceberg catalog instance
+        table_id: Fully qualified table identifier (e.g., 'namespace.table_name')
         target_schema: Target schema with desired columns
-        
+
     Raises:
         Exception: If schema evolution fails, logged and re-raised for troubleshooting
     """
     import traceback
-    
+
+    table = catalog.load_table(table_id)
     current_schema = table.schema()
     current_fields = {field.name for field in current_schema.fields}
     target_fields = {field.name: field for field in target_schema.fields}
-    
+
     missing_fields = set(target_fields.keys()) - current_fields
-    
+
     if not missing_fields:
         log("[load] Schema is up to date, no evolution needed")
         return
-    
-    log(f"[load] Schema evolution required: adding {len(missing_fields)} column(s): {sorted(missing_fields)}")
-    
+
+    log(
+        f"[load] Schema evolution required: adding {len(missing_fields)} column(s): {sorted(missing_fields)}"
+    )
+
     try:
         with table.update_schema() as update:
             for field_name in sorted(missing_fields):
                 field = target_fields[field_name]
-                log(f"[load] Adding column: {field_name} ({field.field_type}, required={field.required})")
+                log(
+                    f"[load] Adding column: {field_name} ({field.field_type}, required={field.required})"
+                )
                 update.add_column(
                     field_name,
                     field.field_type,
-                    doc=field.doc if hasattr(field, 'doc') else None,
-                    required=field.required
+                    doc=field.doc if hasattr(field, "doc") else None,
+                    required=field.required,
                 )
-        
-        log("[load] Schema evolution successful")
-        
+
+        log("[load] Schema evolution committed to new table metadata version")
+
     except Exception as e:
         log(f"[load] SCHEMA EVOLUTION FAILED: {type(e).__name__}: {e}")
         log(f"[load] Failed to add columns: {sorted(missing_fields)}")
@@ -227,9 +238,17 @@ def load_ticker_prices(
     try:
         table = catalog.load_table(table_id)
         log(f"[load] Table exists: {table_id}")
-        
+
         # Evolve schema if needed (add missing columns)
-        evolve_schema(table, TICKER_PRICES_SCHEMA)
+        # Pass catalog and table_id so function can work with fresh metadata
+        evolve_schema(catalog, table_id, TICKER_PRICES_SCHEMA)
+
+        # Reload table with fresh metadata after schema evolution
+        table = catalog.load_table(table_id)
+        table.refresh()  # Force refresh of cached metadata
+        log(
+            f"[load] Table loaded with current schema fields: {[f.name for f in table.schema().fields]}"
+        )
 
         num_batches = (deduped_count + batch_size - 1) // batch_size
         log(f"[load] Will process {num_batches} batches of up to {batch_size} rows")

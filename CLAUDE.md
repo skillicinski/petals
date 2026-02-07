@@ -22,6 +22,10 @@ A justfile with recipes is used to collect and add concise commands that help wi
 
 We use `ruff` to follow PEP8 formatting.
 
+## Testing
+
+On all changes to source Python code that is deployed, we want to run comprehensive unit tests and integration tests. If these are not present, suggest adding them. For our foundational test pattern we use `pytest` with `localstack` and `moto`.
+
 ## Debugging
 
 Typical debugging tasks start by checking the CloudWatch logs for the relevant Log Group and the most recent Log Stream in it.

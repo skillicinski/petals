@@ -355,7 +355,9 @@ if __name__ == "__main__":
     test_tickers = ["AAPL", "GOOGL", "MSFT", "INVALID123"]
 
     print("Testing ticker price extraction...")
-    for record in fetch_ticker_prices_batch(test_tickers, batch_size=2, market="stocks", locale="us"):
+    for record in fetch_ticker_prices_batch(
+        test_tickers, batch_size=2, market="stocks", locale="us"
+    ):
         ticker = record["ticker"]
         close = record["close"]
         market_val = record["market"]
