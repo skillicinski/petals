@@ -57,6 +57,8 @@ def fetch_ticker_prices_batch(
     date: str | None = None,
     batch_size: int = 100,
     progress_interval: int = 100,
+    market: str = "stocks",
+    locale: str = "us",
 ) -> Iterator[dict]:
     """
     Fetch OHLC price data for a batch of tickers using yfinance.
@@ -70,9 +72,11 @@ def fetch_ticker_prices_batch(
         date: Target date (YYYY-MM-DD). If None, uses yesterday.
         batch_size: Number of tickers to fetch in parallel
         progress_interval: Log progress every N tickers
+        market: Market type (e.g., "stocks", "otc", "fx"). Defaults to "stocks".
+        locale: Locale/region (e.g., "us"). Defaults to "us".
 
     Yields:
-        Dict with ticker, date, open, high, low, close, volume, last_fetched_utc
+        Dict with ticker, date, open, high, low, close, volume, last_fetched_utc, market, locale
         (OHLC fields will be None if no data is available)
     """
     if not date:
@@ -164,6 +168,8 @@ def fetch_ticker_prices_batch(
                             "last_fetched_utc": datetime.now(timezone.utc)
                             .isoformat()
                             .replace("+00:00", "Z"),
+                            "market": market,
+                            "locale": locale,
                         }
                     else:
                         # Regular columns (fallback, though yfinance typically uses MultiIndex)
@@ -180,6 +186,8 @@ def fetch_ticker_prices_batch(
                             "last_fetched_utc": datetime.now(timezone.utc)
                             .isoformat()
                             .replace("+00:00", "Z"),
+                            "market": market,
+                            "locale": locale,
                         }
                     fetched += 1
                 else:
@@ -195,6 +203,8 @@ def fetch_ticker_prices_batch(
                         "last_fetched_utc": datetime.now(timezone.utc)
                         .isoformat()
                         .replace("+00:00", "Z"),
+                        "market": market,
+                        "locale": locale,
                     }
                     no_data += 1
             else:
@@ -229,6 +239,8 @@ def fetch_ticker_prices_batch(
                                         "last_fetched_utc": datetime.now(timezone.utc)
                                         .isoformat()
                                         .replace("+00:00", "Z"),
+                                        "market": market,
+                                        "locale": locale,
                                     }
                                     fetched += 1
                                 else:
@@ -244,6 +256,8 @@ def fetch_ticker_prices_batch(
                                         "last_fetched_utc": datetime.now(timezone.utc)
                                         .isoformat()
                                         .replace("+00:00", "Z"),
+                                        "market": market,
+                                        "locale": locale,
                                     }
                                     no_data += 1
                             else:
@@ -259,6 +273,8 @@ def fetch_ticker_prices_batch(
                                     "last_fetched_utc": datetime.now(timezone.utc)
                                     .isoformat()
                                     .replace("+00:00", "Z"),
+                                    "market": market,
+                                    "locale": locale,
                                 }
                                 no_data += 1
                         else:
@@ -274,6 +290,8 @@ def fetch_ticker_prices_batch(
                                 "last_fetched_utc": datetime.now(timezone.utc)
                                 .isoformat()
                                 .replace("+00:00", "Z"),
+                                "market": market,
+                                "locale": locale,
                             }
                             no_data += 1
                     except (KeyError, IndexError, Exception):
@@ -289,6 +307,8 @@ def fetch_ticker_prices_batch(
                             "last_fetched_utc": datetime.now(timezone.utc)
                             .isoformat()
                             .replace("+00:00", "Z"),
+                            "market": market,
+                            "locale": locale,
                         }
                         no_data += 1
 
@@ -313,6 +333,8 @@ def fetch_ticker_prices_batch(
                     "last_fetched_utc": datetime.now(timezone.utc)
                     .isoformat()
                     .replace("+00:00", "Z"),
+                    "market": market,
+                    "locale": locale,
                 }
             no_data += len(batch_tickers)
 
@@ -333,7 +355,12 @@ if __name__ == "__main__":
     test_tickers = ["AAPL", "GOOGL", "MSFT", "INVALID123"]
 
     print("Testing ticker price extraction...")
-    for record in fetch_ticker_prices_batch(test_tickers, batch_size=2):
+    for record in fetch_ticker_prices_batch(test_tickers, batch_size=2, market="stocks", locale="us"):
         ticker = record["ticker"]
         close = record["close"]
-        print(f"{ticker}: close=${close:.2f} on {record['date']}")
+        market_val = record["market"]
+        locale_val = record["locale"]
+        if close:
+            print(f"{ticker} ({market_val}/{locale_val}): close=${close:.2f} on {record['date']}")
+        else:
+            print(f"{ticker} ({market_val}/{locale_val}): no data on {record['date']}")

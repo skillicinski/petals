@@ -92,12 +92,20 @@ class TestFetchTickerPricesBatch:
             assert "close" in price
             assert "volume" in price
             assert "last_fetched_utc" in price
+            assert "market" in price
+            assert "locale" in price
 
             # Date should be ISO format
             assert isinstance(price["date"], str)
             datetime.strptime(price["date"], "%Y-%m-%d")
 
             # last_fetched_utc should be ISO format with Z
+            assert isinstance(price["last_fetched_utc"], str)
+            assert price["last_fetched_utc"].endswith("Z")
+            
+            # market and locale should be strings
+            assert isinstance(price["market"], str)
+            assert isinstance(price["locale"], str)
             assert price["last_fetched_utc"].endswith("Z")
 
     def test_specific_date(self):
@@ -126,6 +134,8 @@ class TestPricesToArrow:
                 "close": 103.0,
                 "volume": 1000000,
                 "last_fetched_utc": "2024-01-02T00:00:00Z",
+                "market": "stocks",
+                "locale": "us",
             },
             {
                 "ticker": "MSFT",
@@ -136,6 +146,8 @@ class TestPricesToArrow:
                 "close": 203.0,
                 "volume": 2000000,
                 "last_fetched_utc": "2024-01-02T00:00:00Z",
+                "market": "stocks",
+                "locale": "us",
             },
         ]
 
@@ -157,6 +169,8 @@ class TestPricesToArrow:
                 "close": 103.0,
                 "volume": 1000000,
                 "last_fetched_utc": "2024-01-02T00:00:00Z",
+                "market": "stocks",
+                "locale": "us",
             },
             {
                 "ticker": "AAPL",
@@ -167,6 +181,8 @@ class TestPricesToArrow:
                 "close": 104.0,
                 "volume": 1100000,
                 "last_fetched_utc": "2024-01-02T01:00:00Z",
+                "market": "stocks",
+                "locale": "us",
             },
         ]
 
@@ -193,6 +209,8 @@ class TestPricesToArrow:
                 "close": None,
                 "volume": None,
                 "last_fetched_utc": "2024-01-02T00:00:00Z",
+                "market": "stocks",
+                "locale": "us",
             }
         ]
 
@@ -209,8 +227,8 @@ class TestIcebergSchema:
 
     def test_schema_field_count(self):
         """Schema has expected number of fields."""
-        # ticker, date, open, high, low, close, volume, last_fetched_utc
-        assert len(TICKER_PRICES_SCHEMA.fields) == 8
+        # ticker, date, open, high, low, close, volume, last_fetched_utc, market, locale
+        assert len(TICKER_PRICES_SCHEMA.fields) == 10
 
     def test_required_fields(self):
         """Only ticker and date are required."""
@@ -222,6 +240,72 @@ class TestIcebergSchema:
         iceberg_names = {f.name for f in TICKER_PRICES_SCHEMA.fields}
         arrow_names = set(TICKER_PRICES_ARROW_SCHEMA.names)
         assert iceberg_names == arrow_names
+
+
+class TestSchemaEvolution:
+    """Test schema evolution functionality."""
+
+    def test_evolve_schema_adds_missing_column(self):
+        """Schema evolution adds missing columns from target schema."""
+        from unittest.mock import MagicMock
+        from pyiceberg.schema import Schema
+        from pyiceberg.types import NestedField, StringType, DoubleType
+        from src.pipelines.ticker_prices.load import evolve_schema
+
+        # Create a mock table with old schema (missing 'market' field)
+        old_schema = Schema(
+            NestedField(1, "ticker", StringType(), required=True),
+            NestedField(2, "date", StringType(), required=True),
+            NestedField(3, "close", DoubleType(), required=False),
+        )
+        
+        # Target schema with new field
+        new_schema = Schema(
+            NestedField(1, "ticker", StringType(), required=True),
+            NestedField(2, "date", StringType(), required=True),
+            NestedField(3, "close", DoubleType(), required=False),
+            NestedField(4, "market", StringType(), required=False),
+        )
+        
+        # Mock table
+        mock_table = MagicMock()
+        mock_table.schema.return_value = old_schema
+        
+        # Mock update_schema context manager
+        mock_update = MagicMock()
+        mock_table.update_schema.return_value.__enter__.return_value = mock_update
+        mock_table.update_schema.return_value.__exit__.return_value = None
+        
+        # Run evolution
+        evolve_schema(mock_table, new_schema)
+        
+        # Verify add_column was called for the missing field
+        mock_update.add_column.assert_called_once()
+        call_args = mock_update.add_column.call_args
+        assert call_args[0][0] == "market"  # field name
+        assert isinstance(call_args[0][1], StringType)  # field type
+
+    def test_evolve_schema_no_changes_needed(self):
+        """Schema evolution does nothing when schemas match."""
+        from unittest.mock import MagicMock
+        from pyiceberg.schema import Schema
+        from pyiceberg.types import NestedField, StringType
+        from src.pipelines.ticker_prices.load import evolve_schema
+
+        # Same schema
+        schema = Schema(
+            NestedField(1, "ticker", StringType(), required=True),
+            NestedField(2, "date", StringType(), required=True),
+        )
+        
+        mock_table = MagicMock()
+        mock_table.schema.return_value = schema
+        
+        # Run evolution
+        evolve_schema(mock_table, schema)
+        
+        # Verify update_schema was never called
+        mock_table.update_schema.assert_not_called()
 
 
 class TestIntegrationWithRealData:

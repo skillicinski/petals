@@ -164,6 +164,8 @@ def run(
         tickers=tickers,
         date=date,
         batch_size=fetch_batch_size,
+        market="stocks",  # All tickers from reference.tickers filter are stocks
+        locale="us",  # All tickers are US locale
     ):
         prices.append(price_record)
 
