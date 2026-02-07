@@ -126,10 +126,10 @@ class TestEventBridgeSchedule:
         )
 
     def test_schedule_is_weekdays_7am_utc(self, template):
-        """Schedule runs weekdays at 7 AM UTC (8 AM Stockholm time)."""
+        """Schedule runs Tuesday-Saturday at 7 AM UTC to capture Mon-Fri trading days."""
         template.has_resource_properties(
             "AWS::Events::Rule",
-            {"ScheduleExpression": "cron(0 7 ? * MON-FRI *)"},
+            {"ScheduleExpression": "cron(0 7 ? * TUE-SAT *)"},
         )
 
 

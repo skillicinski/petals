@@ -254,8 +254,8 @@ class TickerPricesPipelineStack(Stack):
         # =================================================================
         # EventBridge Schedule (daily in the morning UTC)
         # US market closes at 4 PM ET (9 PM UTC)
-        # Run at 7 AM UTC (8 AM CET Stockholm) - previous day's data is complete
-        # Pipeline defaults to fetching yesterday's data, so this is optimal
+        # Run at 7 AM UTC (8 AM CET Stockholm) Tuesday-Saturday
+        # This captures Monday-Friday trading days (previous day's data)
         # =================================================================
         self.schedule_rule = events.Rule(
             self,
@@ -265,7 +265,7 @@ class TickerPricesPipelineStack(Stack):
                 minute="0",
                 hour="7",  # 7 AM UTC = 8 AM CET (Stockholm winter)
                 month="*",
-                week_day="MON-FRI",  # Only run on trading days
+                week_day="TUE-SAT",  # Tuesday-Saturday to capture Mon-Fri trading days
                 year="*",
             ),
         )

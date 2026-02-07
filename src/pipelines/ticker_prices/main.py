@@ -87,9 +87,13 @@ def get_us_stock_tickers(
 
     log(f"[main] Total tickers in table: {len(tickers_df):,}")
 
-    # Filter to US stocks
-    tickers_df = tickers_df.filter((pl.col("market") == "stocks") & (pl.col("locale") == "us"))
-    log(f"[main] US stock tickers: {len(tickers_df):,}")
+    # Filter to US common stocks and ETFs only
+    tickers_df = tickers_df.filter(
+        (pl.col("market") == "stocks") 
+        & (pl.col("locale") == "us")
+        & (pl.col("type").is_in(["CS", "ETF"]))
+    )
+    log(f"[main] US common stocks and ETFs: {len(tickers_df):,}")
 
     # Optionally filter to active only
     if active_only:
