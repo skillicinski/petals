@@ -20,7 +20,7 @@ STATUS_APPROVED = "approved"
 STATUS_REJECTED = "rejected"
 
 # Output table
-OUTPUT_TABLE = "matching.sponsor_ticker_candidates"
+OUTPUT_TABLE = "relation.sponsor_ticker_candidates"
 
 # Blocking configuration (token-based pre-filter)
 MIN_TOKEN_LENGTH = 2  # Ignore tokens shorter than this

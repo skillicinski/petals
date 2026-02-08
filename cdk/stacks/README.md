@@ -15,7 +15,7 @@ The Lake Formation API validates `CatalogId` as a 12-character AWS account ID, w
 3. **Principals**: IAM users and roles → `petals-cli`
 4. **LF-Tags or catalog resources**: Select "Named Data Catalog resources"
 5. **Catalogs**: `s3tablescatalog/petals-tables-<account-id>`
-6. **Databases**: `reference`
+6. **Databases**: `market`, `clinical`, `relation`
 7. **Tables**: All tables
 8. **Table permissions**: Select, Describe
 9. Click **Grant**

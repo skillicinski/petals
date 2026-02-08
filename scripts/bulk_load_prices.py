@@ -189,7 +189,7 @@ def load_file(file: str, schema: dict, market: str):
 def bulk_append(
     prices: list[dict],
     table_bucket_arn: str,
-    namespace: str = 'market_data',
+    namespace: str = 'market',
     table_name: str = 'ticker_prices',
     region: str = 'us-east-1',
     batch_size: int = 50000,

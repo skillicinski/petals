@@ -2,7 +2,7 @@
 
 Fetches:
 - Left side: distinct sponsors from clinical.trials
-- Right side: companies from reference.ticker_details
+- Right side: companies from market.ticker_details
 """
 
 import os
@@ -57,7 +57,7 @@ def fetch_tickers(limit: int | None = None) -> pl.DataFrame:
     Returns DataFrame with columns: ticker, market, name, description
     """
     catalog = get_catalog()
-    table = catalog.load_table("reference.ticker_details")
+    table = catalog.load_table("market.ticker_details")
 
     scan = table.scan(
         selected_fields=["ticker", "market", "name", "description"], row_filter="name IS NOT NULL"

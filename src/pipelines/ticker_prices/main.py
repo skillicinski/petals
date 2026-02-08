@@ -1,9 +1,9 @@
 """
 Main entry point for ticker prices (OHLC) pipeline.
 
-Reads US stock tickers from reference.tickers table and fetches
+Reads US stock tickers from market.tickers table and fetches
 yesterday's (or today's if after market close) OHLC data using yfinance.
-Loads to market_data.ticker_prices table.
+Loads to market.ticker_prices table.
 
 Performance
 ===========
@@ -80,9 +80,9 @@ def get_us_stock_tickers(
     Returns:
         List of ticker symbols
     """
-    log("[main] Loading tickers from reference.tickers...")
+    log("[main] Loading tickers from market.tickers...")
     catalog = get_catalog(table_bucket_arn, region)
-    tickers_table = catalog.load_table("reference.tickers")
+    tickers_table = catalog.load_table("market.tickers")
     tickers_df = pl.from_arrow(tickers_table.scan().to_arrow())
 
     log(f"[main] Total tickers in table: {len(tickers_df):,}")

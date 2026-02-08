@@ -373,17 +373,17 @@ class TickerDetailsPipelineStack(Stack):
         self.state_table.grant_read_write_data(self.state_machine)
 
         # =================================================================
-        # EventBridge Schedule (daily at 7 AM UTC, 1 hour after tickers)
+        # EventBridge Schedule (weekly on Saturdays at 7 AM UTC)
         # =================================================================
         self.schedule_rule = events.Rule(
             self,
             "TickerDetailsSchedule",
-            rule_name="petals-ticker-details-daily",
+            rule_name="petals-ticker-details-weekly",
             schedule=events.Schedule.cron(
                 minute="0",
                 hour="7",
                 month="*",
-                week_day="*",
+                week_day="SAT",
                 year="*",
             ),
             targets=[

@@ -3,6 +3,8 @@ Load OHLC price data to S3 Tables (Iceberg).
 
 Uses SCD Type 1 (update in place) with PyIceberg's native upsert.
 The (ticker, date) composite key identifies rows for upsert matching.
+
+Table is partitioned by month(date) for query optimization.
 """
 
 import sys
@@ -10,23 +12,36 @@ import sys
 import pyarrow as pa
 from pyiceberg.catalog import load_catalog
 from pyiceberg.exceptions import NoSuchTableError
+from pyiceberg.partitioning import PartitionField, PartitionSpec
 from pyiceberg.schema import Schema
+from pyiceberg.transforms import TruncateTransform
 from pyiceberg.types import DoubleType, LongType, NestedField, StringType
 
 # Schema for ticker prices (OHLC)
 # (ticker, date) composite key
 TICKER_PRICES_SCHEMA = Schema(
-    NestedField(1, "ticker", StringType(), required=True),
-    NestedField(2, "date", StringType(), required=True),
-    NestedField(3, "open", DoubleType(), required=False),
-    NestedField(4, "high", DoubleType(), required=False),
-    NestedField(5, "low", DoubleType(), required=False),
-    NestedField(6, "close", DoubleType(), required=False),
-    NestedField(7, "volume", LongType(), required=False),
-    NestedField(8, "last_fetched_utc", StringType(), required=False),
-    NestedField(10, "locale", StringType(), required=False),
-    NestedField(9, "market", StringType(), required=False),
+    NestedField(1, 'ticker', StringType(), required=True),
+    NestedField(2, 'date', StringType(), required=True),
+    NestedField(3, 'open', DoubleType(), required=False),
+    NestedField(4, 'high', DoubleType(), required=False),
+    NestedField(5, 'low', DoubleType(), required=False),
+    NestedField(6, 'close', DoubleType(), required=False),
+    NestedField(7, 'volume', LongType(), required=False),
+    NestedField(8, 'last_fetched_utc', StringType(), required=False),
+    NestedField(10, 'locale', StringType(), required=False),
+    NestedField(9, 'market', StringType(), required=False),
     identifier_field_ids=[1, 2],
+)
+
+# Partition spec: monthly partitioning on date column for query optimization
+# Uses truncate(7) since date is StringType in YYYY-MM-DD format
+TICKER_PRICES_PARTITION_SPEC = PartitionSpec(
+    PartitionField(
+        source_id=2,  # field id for 'date' column
+        field_id=1000,
+        transform=TruncateTransform(7),  # Truncate to 7 chars (YYYY-MM)
+        name='date_month'
+    )
 )
 
 # Arrow schema matching the Iceberg schema
@@ -166,7 +181,7 @@ def prices_to_arrow(prices: list[dict]) -> pa.Table:
 
 def table_exists(
     table_bucket_arn: str,
-    namespace: str = "market_data",
+    namespace: str = "market",
     table_name: str = "ticker_prices",
     region: str = "us-east-1",
 ) -> bool:
@@ -182,7 +197,7 @@ def table_exists(
 def load_ticker_prices(
     prices: list[dict],
     table_bucket_arn: str,
-    namespace: str = "market_data",
+    namespace: str = "market",
     table_name: str = "ticker_prices",
     region: str = "us-east-1",
     batch_size: int = 1000,
@@ -277,12 +292,17 @@ def load_ticker_prices(
         return {"rows_inserted": total_inserted, "rows_updated": total_updated}
 
     except NoSuchTableError:
-        log(f"[load] Creating table: {table_id}")
-        table = catalog.create_table(table_id, schema=TICKER_PRICES_SCHEMA)
-        log("[load] Table created, appending data...")
+        log(f'[load] Creating table: {table_id}')
+        table = catalog.create_table(
+            table_id,
+            schema=TICKER_PRICES_SCHEMA,
+            partition_spec=TICKER_PRICES_PARTITION_SPEC
+        )
+        log('[load] Table created with monthly partitioning on date column')
+        log('[load] Appending data...')
         table.append(arrow_table)
-        log(f"[load] Initial load complete: {deduped_count:,} records")
-        return {"rows_inserted": deduped_count, "rows_updated": 0}
+        log(f'[load] Initial load complete: {deduped_count:,} records')
+        return {'rows_inserted': deduped_count, 'rows_updated': 0}
 
     except Exception as e:
         log(f"[load] FATAL ERROR: {type(e).__name__}: {e}")

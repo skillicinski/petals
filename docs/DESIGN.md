@@ -32,7 +32,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for system diagram.
 
 ## Tables
 
-### reference.tickers
+### market.tickers
 
 **Purpose:** Master list of tradeable instruments from Massive (formerly Polygon.io) API.
 
@@ -45,7 +45,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for system diagram.
 - `delisted_utc` from bulk API provides delisting date when available
 - `active` boolean indicates current trading status
 
-### reference.ticker_details
+### market.ticker_details
 
 **Purpose:** Enriched ticker details from Massive API for US stock tickers. SIC codes enable downstream industry filtering (e.g., pharma/biotech for entity matching with clinical trial sponsors).
 
@@ -61,6 +61,17 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for system diagram.
 - ADRs (foreign companies) have no SIC code - handled separately in matching logic
 - Initial backfill takes ~54 hours due to API rate limiting (5 calls/min)
 
+### market.ticker_prices
+
+**Purpose:** Daily OHLCV (Open, High, Low, Close, Volume) price data for tickers using `yfinance`. Historical data backfilled manually using files from https://stooq.com/db/h/.
+
+**Primary Key:** `(ticker, date)` composite - unique daily price record per ticker.
+
+**Change Strategy:** Fact table using upsert to handle corrections or backfills. New records are inserted; existing (ticker, date) combinations are updated in place.
+
+**Design Notes:**
+- Uses monthly partitioning on the `date` column (`TruncateTransform(7)` truncates YYYY-MM-DD string to YYYY-MM) to optimize date range queries (YTD, quarterly reports) and time-series analysis. Hidden partitions like `date_month=2024-01` are automatically created. For new tables, the partition spec is applied at creation; for existing unpartitioned tables, adding the spec only partitions future data while existing data remains unpartitioned (requires a full rewrite to partition historical data).
+
 ### clinical.trials
 
 **Purpose:** Completed clinical trials from ClinicalTrials.gov API, filtered to INDUSTRY sponsors (pharma/biotech companies).
@@ -75,18 +86,13 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for system diagram.
 - `has_results` boolean indicates whether study results have been posted
 - `completion_date` and `primary_completion_date` are returned in mixed formats in API responses: full dates (`2024-08-06`) or year-month only (`2011-01`). We normalize year-month values to first-of-month (`2011-01` → `2011-01-01`) for consistent date handling and downstream stock price correlation analysis.
 
-### matching.sponsor_ticker_candidates
+## Namespaces
 
-**Purpose:** Links clinical trial sponsors to public company tickers using embedding-based similarity matching. Enables cross-domain analysis (e.g., trial completion → stock price correlation).
+### market
+Contains reference data and market prices for financial instruments (tickers, ticker details, daily prices).
 
-**Primary Key:** `(sponsor_name, ticker)` composite - each sponsor matches at most one ticker.
+### clinical
+Contains clinical trial data from ClinicalTrials.gov.
 
-**Change Strategy:** Full replace per run. Each pipeline execution produces a complete set of matches; previous runs are not merged.
-
-**Design Notes:**
-- Uses sentence-transformer embeddings (`all-MiniLM-L6-v2`) for semantic similarity - deterministic and hallucination-free unlike LLM-based approaches
-- Token-based blocking reduces tens of millions of potential pairs to hundreds of thousands
-- Greedy 1:1 matching ensures each sponsor maps to at most one ticker
-- Three-tier confidence thresholds: ≥0.85 auto-approve, 0.65-0.85 pending review, <0.65 auto-reject
-- `status` column tracks review state: 'approved', 'pending', or 'rejected'
-- Full run completes in ~21 seconds on CPU
+### relation
+Reserved for relational/mapping tables that link entities across datasets (e.g., sponsor-to-ticker mappings). Currently empty.

@@ -16,7 +16,7 @@ A personal project demonstrating end-to-end data platform design and implementat
 | `tickers` | Stock/ETF ticker reference data from Massive API | Daily 6 AM UTC |
 | `ticker_details` | Enriched ticker details (SIC codes, descriptions) for US stocks | Daily 7 AM UTC |
 | `trials` | Completed clinical trials from ClinicalTrials.gov (INDUSTRY sponsors) | Daily 7 AM UTC |
-| `entity_match` | LLM-powered sponsor↔ticker matching | On-demand |
+| `entity_match` | Embedding-based sponsor↔ticker matching | On-demand |
 
 ## Setup
 

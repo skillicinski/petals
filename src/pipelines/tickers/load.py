@@ -119,7 +119,7 @@ def tickers_to_arrow(tickers: list[dict]) -> pa.Table:
 
 def table_exists(
     table_bucket_arn: str,
-    namespace: str = "reference",
+    namespace: str = "market",
     table_name: str = "tickers",
     region: str = "us-east-1",
 ) -> bool:
@@ -153,7 +153,7 @@ def log_memory(label: str) -> None:
 def load_tickers(
     tickers: list[dict],
     table_bucket_arn: str,
-    namespace: str = "reference",
+    namespace: str = "market",
     table_name: str = "tickers",
     region: str = "us-east-1",
     batch_size: int = 5000,

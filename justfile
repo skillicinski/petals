@@ -29,11 +29,11 @@ health:
     
     # Pipeline definitions: name|namespace|table|daily (1=check staleness)
     pipelines=(
-        "tickers|reference|tickers|1"
-        "ticker_details|reference|ticker_details|1"
-        "ticker_prices|market_data|ticker_prices|1"
+        "tickers|market|tickers|1"
+        "ticker_details|market|ticker_details|1"
+        "ticker_prices|market|ticker_prices|1"
         "trials|clinical|trials|1"
-        "entity_match|matching|sponsor_ticker_candidates|0"
+        "entity_match|relation|sponsor_ticker_candidates|0"
     )
     
     for entry in "${pipelines[@]}"; do

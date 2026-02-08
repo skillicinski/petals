@@ -292,17 +292,17 @@ class TrialsPipelineStack(Stack):
         self.state_table.grant_read_write_data(self.state_machine)
 
         # =================================================================
-        # EventBridge Schedule (daily at 7 AM UTC - offset from tickers)
+        # EventBridge Schedule (weekly on Saturdays at 8 AM UTC)
         # =================================================================
         self.schedule_rule = events.Rule(
             self,
             "TrialsSchedule",
-            rule_name="petals-trials-daily",
+            rule_name="petals-trials-weekly",
             schedule=events.Schedule.cron(
                 minute="0",
-                hour="7",  # 1 hour after tickers pipeline
+                hour="8",  # 1 hour after ticker_details on Saturdays
                 month="*",
-                week_day="*",
+                week_day="SAT",
                 year="*",
             ),
             targets=[

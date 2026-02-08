@@ -30,7 +30,12 @@ The preferred method for warehousing of data loaded through pipelines is as Parq
 
 When we create tables within your Amazon S3 table bucket, we organize them into logical groupings called namespaces. Namespaces aren't resources, they are constructs that help organize and manage our tables in a scalable manner. For example, all the tables that contain financial market data could be grouped in the namespace `market`.
 
-The AWS CLI uses `s3tables` to communicate with Table Bucket APIs, for example:
+The AWS CLI uses `s3tables` to communicate with Table Bucket APIs, for example to list the first table bucket in a region:
+```bash
+aws s3tables list-table-buckets --profile personal --region us-east-1 --output json --query 'tableBuckets[0].arn'
+```
+
+Or, to get the status of an automated table maintenance process:
 ```bash
 aws s3tables get-table-maintenance-job-status \
    --table-bucket-arn="arn:aws:s3tables:arn:aws::111122223333:bucket/amzn-s3-demo-bucket1" \

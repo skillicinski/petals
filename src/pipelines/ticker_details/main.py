@@ -1,8 +1,8 @@
 """
 Main entry point for ticker details enrichment pipeline.
 
-Reads tickers from reference.tickers table, fetches detailed information
-from Massive API, and loads to reference.ticker_details table.
+Reads tickers from market.tickers table, fetches detailed information
+from Massive API, and loads to market.ticker_details table.
 
 Filters to US stock tickers only. Industry filtering (e.g., pharma/biotech)
 is handled downstream in entity_match using SIC codes.
@@ -67,7 +67,7 @@ def get_tickers_to_enrich(
     region: str,
 ) -> list[tuple[str, str]]:
     """
-    Get list of tickers to enrich from reference.tickers table.
+    Get list of tickers to enrich from market.tickers table.
 
     Filters to US stock tickers only. Only returns tickers that:
     - Don't exist in ticker_details yet, OR
@@ -82,9 +82,9 @@ def get_tickers_to_enrich(
     Returns:
         List of (ticker, market) tuples
     """
-    log("[main] Loading tickers from reference.tickers...")
+    log("[main] Loading tickers from market.tickers...")
     catalog = get_catalog(table_bucket_arn, region)
-    tickers_table = catalog.load_table("reference.tickers")
+    tickers_table = catalog.load_table("market.tickers")
     tickers_df = pl.from_arrow(tickers_table.scan().to_arrow())
 
     log(f"[main] Total tickers in table: {len(tickers_df):,}")
@@ -96,7 +96,7 @@ def get_tickers_to_enrich(
     # Compare against existing ticker_details to skip tickers that haven't changed
     if table_exists(table_bucket_arn, region=region):
         log("[main] Loading existing ticker_details for change detection...")
-        details_table = catalog.load_table("reference.ticker_details")
+        details_table = catalog.load_table("market.ticker_details")
         details_df = pl.from_arrow(
             details_table.scan(selected_fields=("ticker", "market", "last_fetched_utc")).to_arrow()
         )

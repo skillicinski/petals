@@ -41,9 +41,9 @@ flowchart TB
         ECR[ECR<br/>petals-pipelines]
         DDB[(DynamoDB<br/>Pipeline State)]
         subgraph S3Tables["S3 Tables (Iceberg)"]
-            NS_REF[reference.*]
+            NS_MARKET[market.*]
             NS_CLINICAL[clinical.*]
-            NS_MATCHING[matching.*]
+            NS_RELATION[relation.*]
         end
     end
 
@@ -59,17 +59,17 @@ flowchart TB
     SFN1 <-->|state| DDB
     SFN1 --> BATCH1
     ECR --> BATCH1
-    BATCH1 -->|upsert| NS_REF
+    BATCH1 -->|upsert| NS_MARKET
 
     %% Ticker details pipeline flow
-    NS_REF -->|read US stock tickers| BATCH3
+    NS_MARKET -->|read US stock tickers| BATCH3
     API --> BATCH3
     SM --> BATCH3
     EB3 --> SFN3
     SFN3 <-->|state| DDB
     SFN3 --> BATCH3
     ECR --> BATCH3
-    BATCH3 -->|upsert| NS_REF
+    BATCH3 -->|upsert| NS_MARKET
 
     %% Trials pipeline flow
     CTGOV --> BATCH2
@@ -80,11 +80,11 @@ flowchart TB
     BATCH2 -->|upsert| NS_CLINICAL
 
     %% Entity match pipeline flow
-    NS_REF -->|read tickers| BATCH4
+    NS_MARKET -->|read tickers| BATCH4
     NS_CLINICAL -->|read sponsors| BATCH4
     SFN4 --> BATCH4
     ECR --> BATCH4
-    BATCH4 -->|write matches| NS_MATCHING
+    BATCH4 -->|write matches| NS_RELATION
 
     %% Query flow
     USER --> ATH
@@ -94,10 +94,10 @@ flowchart TB
 ## Data Flow
 
 ### Tickers Pipeline (daily, 6 AM UTC)
-EventBridge triggers Step Functions → reads last run time from DynamoDB → submits Batch job → container fetches from Massive API (incremental) → upserts to S3 Tables `reference.tickers` → records new timestamp
+EventBridge triggers Step Functions → reads last run time from DynamoDB → submits Batch job → container fetches from Massive API (incremental) → upserts to S3 Tables `market.tickers` → records new timestamp
 
 ### Ticker Details Pipeline (daily, 7 AM UTC)
-EventBridge triggers Step Functions → reads last run time from DynamoDB → submits Batch job → reads US stock tickers from `reference.tickers` (`market='stocks'`, `locale='us'`) → fetches detailed info from Massive API (SIC codes, descriptions, etc.) → upserts to S3 Tables `reference.ticker_details` → records new timestamp
+EventBridge triggers Step Functions → reads last run time from DynamoDB → submits Batch job → reads US stock tickers from `market.tickers` (`market='stocks'`, `locale='us'`) → fetches detailed info from Massive API (SIC codes, descriptions, etc.) → upserts to S3 Tables `market.ticker_details` → records new timestamp
 
 *Note: Initial backfill takes ~54 hours due to API rate limiting (5 calls/min). Incremental runs are much faster. Industry filtering (pharma/biotech via SIC codes) is done downstream.*
 
@@ -105,7 +105,7 @@ EventBridge triggers Step Functions → reads last run time from DynamoDB → su
 EventBridge triggers Step Functions → reads last run time from DynamoDB → submits Batch job → container fetches COMPLETED studies from ClinicalTrials.gov (filtered to INDUSTRY sponsors) → upserts to S3 Tables `clinical.trials` → records new timestamp
 
 ### Entity Match Pipeline (on-demand)
-Manual trigger → Step Functions submits Batch job → reads sponsors from `clinical.trials` and tickers from `reference.ticker_details` → computes sentence-transformer embeddings → scores candidate pairs via cosine similarity → applies greedy 1:1 matching → writes matched pairs to `matching.sponsor_ticker_candidates`
+Manual trigger → Step Functions submits Batch job → reads sponsors from `clinical.trials` and tickers from `market.ticker_details` → computes sentence-transformer embeddings → scores candidate pairs via cosine similarity → applies greedy 1:1 matching → writes matched pairs to `relation.sponsor_ticker_candidates`
 
 *Note: Uses CPU-only embedding model (`all-MiniLM-L6-v2`), no GPU required. Full run completes in ~21 seconds.*
 
@@ -116,8 +116,9 @@ Athena queries S3 Tables via federated catalog (`s3tablescatalog`)
 
 | Namespace | Table | Description |
 |-----------|-------|-------------|
-| `reference` | `tickers` | Stock/ETF ticker reference data from Massive API |
-| `reference` | `ticker_details` | Enriched ticker details (SIC codes, descriptions) for US stock tickers |
+| `market` | `tickers` | Stock/ETF ticker reference data from Massive API |
+| `market` | `ticker_details` | Enriched ticker details (SIC codes, descriptions) for US stock tickers |
+| `market` | `ticker_prices` | Daily OHLCV price data for tickers (yfinance + historical data) |
 | `clinical` | `trials` | Completed clinical trials from ClinicalTrials.gov (INDUSTRY sponsors) |
-| `matching` | `sponsor_ticker_candidates` | Sponsor↔ticker matches with confidence scores (embedding similarity) |
+| `relation` | `sponsor_ticker_candidates` | Sponsor↔ticker matches with confidence scores (embedding similarity) |
 
