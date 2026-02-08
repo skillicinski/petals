@@ -1,10 +1,10 @@
-"""Tests for entity matching pipeline (embedding-based)."""
+"""Tests for entity resolution pipeline (embedding-based)."""
 
 import polars as pl
 import pytest
 
-from src.pipelines.entity_match.blocking import build_token_index, tokenize
-from src.pipelines.entity_match.config import (
+from src.analytics.entity_resolution.blocking import build_token_index, tokenize
+from src.analytics.entity_resolution.config import (
     COMMON_TOKENS,
     CONFIDENCE_AUTO_APPROVE,
     CONFIDENCE_AUTO_REJECT,
@@ -119,7 +119,7 @@ class TestMainPipeline:
 
     def test_select_best_matches_greedy(self):
         """Best matches uses greedy 1:1 assignment."""
-        from src.pipelines.entity_match.main import select_best_matches
+        from src.analytics.entity_resolution.main import select_best_matches
 
         # Create candidates where sponsor A matches both T1 (0.9) and T2 (0.8)
         # and sponsor B matches both T1 (0.85) and T2 (0.7)
@@ -141,7 +141,7 @@ class TestMainPipeline:
 
     def test_select_best_matches_respects_min_confidence(self):
         """Matches below min_confidence are excluded."""
-        from src.pipelines.entity_match.main import select_best_matches
+        from src.analytics.entity_resolution.main import select_best_matches
 
         df = pl.DataFrame(
             {
@@ -158,7 +158,7 @@ class TestMainPipeline:
 
     def test_generate_all_pairs(self):
         """Generate all pairs without blocking."""
-        from src.pipelines.entity_match.main import generate_all_pairs
+        from src.analytics.entity_resolution.main import generate_all_pairs
 
         left_df = pl.DataFrame({"sponsor_name": ["A", "B"]})
         right_df = pl.DataFrame({"ticker": ["T1", "T2", "T3"]})
@@ -183,7 +183,7 @@ class TestEmbeddings:
 
     def test_compute_embeddings_shape(self, model_available):
         """Embeddings have correct shape."""
-        from src.pipelines.entity_match.main import compute_embeddings
+        from src.analytics.entity_resolution.main import compute_embeddings
 
         texts = ["Hello world", "Test text"]
         embeddings = compute_embeddings(texts, show_progress=False)
@@ -195,7 +195,7 @@ class TestEmbeddings:
         """Embeddings are L2 normalized."""
         import numpy as np
 
-        from src.pipelines.entity_match.main import compute_embeddings
+        from src.analytics.entity_resolution.main import compute_embeddings
 
         texts = ["Test"]
         embeddings = compute_embeddings(texts, show_progress=False)
@@ -208,7 +208,7 @@ class TestEmbeddings:
         """Similar texts have high cosine similarity."""
         import numpy as np
 
-        from src.pipelines.entity_match.main import compute_embeddings
+        from src.analytics.entity_resolution.main import compute_embeddings
 
         texts = ["Pfizer Inc.", "Pfizer Corporation"]
         embeddings = compute_embeddings(texts, show_progress=False)
@@ -222,7 +222,7 @@ class TestEmbeddings:
         """Different texts have lower similarity."""
         import numpy as np
 
-        from src.pipelines.entity_match.main import compute_embeddings
+        from src.analytics.entity_resolution.main import compute_embeddings
 
         texts = ["Pfizer Inc.", "Apple Computer"]
         embeddings = compute_embeddings(texts, show_progress=False)

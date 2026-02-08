@@ -1,7 +1,9 @@
-"""Entity matching pipeline - embedding-based approach.
+"""Entity resolution pipeline - embedding-based approach.
 
-Matches clinical trial sponsors to public company tickers using
-sentence-transformer embeddings and cosine similarity.
+Resolves clinical trial sponsor entities to public company ticker entities
+using sentence-transformer embeddings and cosine similarity.
+
+Part of the analytics layer (not ETL) - depends on upstream pipeline data.
 
 Flow:
 1. Extract sponsors and tickers from Iceberg tables
@@ -24,10 +26,10 @@ Environment variables:
 Usage:
     # Local development
     AWS_PROFILE=personal LIMIT_SPONSORS=100 LIMIT_TICKERS=200 \
-        python -m src.pipelines.entity_match.main
+        python -m src.analytics.entity_resolution.main
 
     # Full run
-    AWS_PROFILE=personal python -m src.pipelines.entity_match.main
+    AWS_PROFILE=personal python -m src.analytics.entity_resolution.main
 """
 
 import os
@@ -295,7 +297,7 @@ def run_pipeline(
     skip_blocking: bool = False,
     save_iceberg: bool = False,
 ) -> pl.DataFrame:
-    """Run the entity matching pipeline.
+    """Run the entity resolution pipeline.
 
     Args:
         limit_sponsors: Max sponsors to process (for testing)
@@ -311,7 +313,7 @@ def run_pipeline(
     start_time = time.time()
     run_id = generate_run_id()
 
-    print("[main] === ENTITY MATCHING PIPELINE ===")
+    print("[main] === ENTITY RESOLUTION PIPELINE ===")
     print(f"[main] Run ID: {run_id}")
     print(f"[main] Model: {model_name}")
     print(

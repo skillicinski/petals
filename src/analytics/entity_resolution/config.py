@@ -1,9 +1,9 @@
-"""Configuration for entity matching pipeline.
+"""Configuration for entity resolution pipeline.
 
 Defines thresholds, table names, and blocking rules.
-Currently specific to sponsor↔ticker matching.
+Currently specific to sponsor↔ticker entity resolution.
 
-Matching approach: sentence-transformer embeddings with cosine similarity.
+Resolution approach: sentence-transformer embeddings with cosine similarity.
 Thresholds calibrated for all-MiniLM-L6-v2 model.
 """
 
@@ -19,8 +19,8 @@ STATUS_PENDING = "pending"
 STATUS_APPROVED = "approved"
 STATUS_REJECTED = "rejected"
 
-# Output table
-OUTPUT_TABLE = "relation.sponsor_ticker_candidates"
+# Output table (in matching namespace)
+OUTPUT_TABLE = "matching.sponsor_ticker_candidates"
 
 # Blocking configuration (token-based pre-filter)
 MIN_TOKEN_LENGTH = 2  # Ignore tokens shorter than this

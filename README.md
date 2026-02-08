@@ -16,7 +16,7 @@ A personal project demonstrating end-to-end data platform design and implementat
 | `tickers` | Stock/ETF ticker reference data from Massive API | Daily 6 AM UTC |
 | `ticker_details` | Enriched ticker details (SIC codes, descriptions) for US stocks | Daily 7 AM UTC |
 | `trials` | Completed clinical trials from ClinicalTrials.gov (INDUSTRY sponsors) | Daily 7 AM UTC |
-| `entity_match` | Embedding-based sponsor↔ticker matching | On-demand |
+| `entity_resolution` | Embedding-based sponsor↔ticker entity resolution | On-demand |
 
 ## Setup
 
@@ -44,10 +44,9 @@ uv run python -m src.pipelines.tickers.main
 uv run python -m src.pipelines.ticker_details.main
 uv run python -m src.pipelines.trials.main
 
-# Entity match requires Ollama for local LLM
-ollama serve && ollama pull llama3.2:3b
-LLM_BACKEND=ollama LIMIT_SPONSORS=50 LIMIT_TICKERS=150 \
-  uv run python -m src.pipelines.entity_match.main
+# Entity resolution (analytics layer - depends on pipeline data)
+LIMIT_SPONSORS=50 LIMIT_TICKERS=150 \
+  uv run python -m src.analytics.entity_resolution.main
 
 # Run tests
 just test

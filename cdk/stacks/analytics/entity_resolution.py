@@ -1,14 +1,16 @@
 """
-CDK stack for the entity matching pipeline.
+CDK stack for the entity resolution pipeline.
+
+Part of the analytics layer (not ETL) - resolves entities across datasets.
 
 Components:
 - Batch compute environment (Fargate Spot for cost savings)
 - Batch job queue and job definition
 - Step Functions state machine for orchestration
 
-On-demand only (no schedule) - trigger manually with: just trigger entity_match false
+On-demand only (no schedule) - trigger manually with: just trigger entity_resolution false
 
-Uses sentence-transformer embeddings.
+Uses sentence-transformer embeddings for semantic matching.
 """
 
 from aws_cdk import (
@@ -31,7 +33,12 @@ from aws_cdk import aws_stepfunctions_tasks as tasks
 from constructs import Construct
 
 
-class EntityMatchPipelineStack(Stack):
+class EntityResolutionStack(Stack):
+    """Analytics stack for entity resolution workloads.
+
+    Separate from ETL pipelines - depends on upstream data from pipelines layer.
+    """
+
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
@@ -124,7 +131,7 @@ class EntityMatchPipelineStack(Stack):
         self.job_role.add_to_policy(
             iam.PolicyStatement(
                 actions=["s3:PutObject", "s3:GetObject"],
-                resources=[f"{artifacts_bucket_arn}/recovery/entity_match/*"],
+                resources=[f"{artifacts_bucket_arn}/recovery/entity_resolution/*"],
             )
         )
 
@@ -149,7 +156,7 @@ class EntityMatchPipelineStack(Stack):
                     log_group=logs.LogGroup(
                         self,
                         "EntityMatchLogGroup",
-                        log_group_name="/petals/pipelines/entity_match",
+                        log_group_name="/petals/pipelines/entity_resolution",
                         retention=logs.RetentionDays.TWO_WEEKS,
                         removal_policy=RemovalPolicy.DESTROY,
                     ),
@@ -158,7 +165,7 @@ class EntityMatchPipelineStack(Stack):
                     "TABLE_BUCKET_ARN": table_bucket_arn,
                     "ARTIFACTS_BUCKET": artifacts_bucket_name,
                     "AWS_DEFAULT_REGION": self.region,
-                    "PIPELINE": "src.pipelines.entity_match.main",
+                    "PIPELINE": "src.analytics.entity_resolution.main",
                     "SAVE_ICEBERG": "1",
                 },
                 assign_public_ip=True,
@@ -176,7 +183,7 @@ class EntityMatchPipelineStack(Stack):
             self,
             "GetPipelineState",
             table=self.state_table,
-            key={"pipeline_id": tasks.DynamoAttributeValue.from_string("entity_match")},
+            key={"pipeline_id": tasks.DynamoAttributeValue.from_string("entity_resolution")},
             result_path="$.state",
         )
 
@@ -202,7 +209,7 @@ class EntityMatchPipelineStack(Stack):
             "UpdatePipelineState",
             table=self.state_table,
             item={
-                "pipeline_id": tasks.DynamoAttributeValue.from_string("entity_match"),
+                "pipeline_id": tasks.DynamoAttributeValue.from_string("entity_resolution"),
                 "last_run_time": tasks.DynamoAttributeValue.from_string(
                     sfn.JsonPath.string_at("$$.State.EnteredTime")
                 ),
@@ -217,7 +224,7 @@ class EntityMatchPipelineStack(Stack):
             "RecordFailure",
             table=self.state_table,
             key={
-                "pipeline_id": tasks.DynamoAttributeValue.from_string("entity_match"),
+                "pipeline_id": tasks.DynamoAttributeValue.from_string("entity_resolution"),
             },
             update_expression="SET last_status = :status, #err = :error, cause = :cause",
             expression_attribute_names={"#err": "error"},
@@ -265,7 +272,7 @@ class EntityMatchPipelineStack(Stack):
         self.state_table.grant_read_write_data(self.state_machine)
 
         # NOTE: No EventBridge schedule - entity matching is on-demand only
-        # Trigger manually with: just trigger entity_match false
+        # Trigger manually with: just trigger entity_resolution false
 
         # =================================================================
         # Outputs
