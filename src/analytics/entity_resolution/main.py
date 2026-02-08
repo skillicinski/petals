@@ -1,35 +1,37 @@
-"""Entity resolution pipeline - embedding-based approach.
+"""Entity resolution analysis - match clinical trial sponsors to public companies.
 
-Resolves clinical trial sponsor entities to public company ticker entities
-using sentence-transformer embeddings and cosine similarity.
+An analytics workload that uses machine learning to resolve entity names across
+datasets. Unlike pipelines (which move data on schedules), this is an analytical
+process for building matching datasets and models.
 
-Part of the analytics layer (not ETL) - depends on upstream pipeline data.
+Approach:
+---------
+1. Load entities from data warehouse (S3 Tables via Athena)
+2. Token-based blocking to reduce candidate space
+3. Semantic embeddings (sentence-transformers)
+4. Similarity scoring (cosine distance)
+5. Optimal bipartite matching (Hungarian algorithm)
+6. Results saved locally for evaluation and iteration
 
-Flow:
-1. Extract sponsors and tickers from Iceberg tables
-2. Token-based pre-filter (blocking) to reduce candidate pairs
-3. Compute embeddings for filtered entities
-4. Cosine similarity scoring
-5. Optimal 1:1 bipartite matching (greedy or Hungarian algorithm)
-6. Threshold-based classification
+This is model development code, not production ETL. Results can be materialized
+to warehouse tables after validation, but the primary workflow is:
+  warehouse → local analysis → evaluation → iterate
 
 Environment variables:
-    TABLE_BUCKET_ARN: S3 Tables bucket ARN
-    OUTPUT_PATH: Path for Parquet output (default: data/candidates.parquet)
-    LIMIT_SPONSORS: Max sponsors to process (default: all)
-    LIMIT_TICKERS: Max tickers to process (default: all)
-    SAVE_ICEBERG: Set to '1' to save to Iceberg table
-    RUN_ID: Pipeline run identifier (default: auto-generated UUID)
-    EMBEDDING_MODEL: Sentence-transformer model (default: all-MiniLM-L6-v2)
-    SKIP_BLOCKING: Set to '1' to skip token pre-filter (slower but complete)
+    TABLE_BUCKET_ARN: S3 Tables warehouse ARN
+    OUTPUT_PATH: Local output path (default: data/entity_matches.parquet)
+    LIMIT_SPONSORS: Max sponsors for development (default: all)
+    LIMIT_TICKERS: Max tickers for development (default: all)
+    EMBEDDING_MODEL: sentence-transformers model (default: all-MiniLM-L6-v2)
+    SKIP_BLOCKING: Skip token pre-filter (default: false)
     MATCHING_ALGORITHM: 'greedy' or 'hungarian' (default: hungarian)
 
 Usage:
-    # Local development
+    # Development mode (limited data)
     AWS_PROFILE=personal LIMIT_SPONSORS=100 LIMIT_TICKERS=200 \
         python -m src.analytics.entity_resolution.main
 
-    # Full run
+    # Full analysis
     AWS_PROFILE=personal python -m src.analytics.entity_resolution.main
 """
 
@@ -48,7 +50,7 @@ from .config import (
     STATUS_PENDING,
     STATUS_REJECTED,
 )
-from .extract import fetch_sponsors, fetch_tickers
+from .warehouse import load_sponsors, load_tickers
 from .matching import greedy_matching, hungarian_matching
 
 # Lazy import to avoid loading torch until needed
@@ -67,7 +69,7 @@ def get_embedding_model(model_name: str = "all-MiniLM-L6-v2"):
     if _model is None:
         from sentence_transformers import SentenceTransformer
 
-        print(f"[main] Loading embedding model: {model_name}")
+        print(f"Loading embedding model: {model_name}")
         _model = SentenceTransformer(model_name)
     return _model
 
@@ -126,9 +128,9 @@ def pre_filter_by_tokens(
     naive_pairs = len(left_df) * len(right_df)
     reduction = (1 - total_pairs / naive_pairs) * 100 if naive_pairs > 0 else 0
 
-    print(f"[main] Pre-filter: {len(pair_candidates)}/{len(left_df)} sponsors have candidates")
+    print(f"Sponsors with candidates: {len(pair_candidates)}/{len(left_df)}")
     print(
-        f"[main] Candidate pairs: {total_pairs:,} (reduced from {naive_pairs:,}, "
+        f"Candidate pairs: {total_pairs:,} (reduced from {naive_pairs:,}, "
         f"{reduction:.1f}% reduction)"
     )
 
@@ -152,7 +154,7 @@ def generate_all_pairs(
     pair_candidates = {left: right_entities for left in left_entities}
 
     total_pairs = len(left_entities) * len(right_entities)
-    print(f"[main] No pre-filter: {total_pairs:,} pairs to score")
+    print(f"No blocking: {total_pairs:,} pairs to score (full cartesian product)")
 
     return pair_candidates
 
@@ -200,7 +202,7 @@ def select_best_matches(
     else:
         raise ValueError(f"Unknown matching algorithm: {algorithm}. Use 'greedy' or 'hungarian'")
 
-    print(f"[main] 1:1 matching ({algorithm}): {len(result)} unique pairs")
+    print(f"1:1 matching ({algorithm}): {len(result)} unique pairs")
 
     return result
 
@@ -219,7 +221,7 @@ def score_pairs(
     right_entities = list(set(k for keys in pair_candidates.values() for k in keys))
 
     if not left_entities or not right_entities:
-        print("[main] No candidates to score")
+        print("No candidates to score")
         return pl.DataFrame(
             schema={
                 "sponsor_name": pl.Utf8,
@@ -241,9 +243,9 @@ def score_pairs(
     left_texts = left_entities
     right_texts = [right_lookup[k][right_text] for k in right_entities]
 
-    print(
-        f"[main] Computing embeddings for {len(left_texts)} sponsors, {len(right_texts)} tickers..."
-    )
+    print(f"Computing embeddings:")
+    print(f"  Sponsors: {len(left_texts)}")
+    print(f"  Tickers: {len(right_texts)}")
 
     # Compute embeddings
     left_embeddings = compute_embeddings(left_texts, model_name)
@@ -288,59 +290,68 @@ def score_pairs(
     df = pl.DataFrame(results)
     df = df.sort("confidence", descending=True)
 
-    print(f"[main] Scored {len(df)} candidate pairs")
+    print(f"Scored {len(df)} candidate pairs")
+    print(f"  High confidence (≥{CONFIDENCE_AUTO_APPROVE:.0%}): {(df['confidence'] >= CONFIDENCE_AUTO_APPROVE).sum()}")
+    print(f"  Medium confidence: {((df['confidence'] >= CONFIDENCE_AUTO_REJECT) & (df['confidence'] < CONFIDENCE_AUTO_APPROVE)).sum()}")
+    print(f"  Low confidence (<{CONFIDENCE_AUTO_REJECT:.0%}): {(df['confidence'] < CONFIDENCE_AUTO_REJECT).sum()}")
 
     return df
 
 
-def generate_run_id() -> str:
-    """Generate unique run ID (from env or UUID)."""
-    return os.environ.get("RUN_ID") or str(uuid.uuid4())
+def generate_analysis_id() -> str:
+    """Generate unique identifier for this analysis run."""
+    return str(uuid.uuid4())
 
 
-def run_pipeline(
+def analyze_entity_matches(
     limit_sponsors: int | None = None,
     limit_tickers: int | None = None,
     model_name: str = "all-MiniLM-L6-v2",
-    output_path: str = "data/candidates.parquet",
+    output_path: str = "data/entity_matches.parquet",
     skip_blocking: bool = False,
-    save_iceberg: bool = False,
     matching_algorithm: str = "hungarian",
 ) -> pl.DataFrame:
-    """Run the entity resolution pipeline.
+    """Analyze and generate entity match candidates between sponsors and tickers.
+
+    This is an analytics workload, not a pipeline. It loads data from the warehouse,
+    applies ML matching, and saves results locally for evaluation/iteration.
 
     Args:
-        limit_sponsors: Max sponsors to process (for testing)
-        limit_tickers: Max tickers to process (for testing)
-        model_name: Sentence-transformer model
-        output_path: Path for output parquet file
-        skip_blocking: Skip token pre-filter (compare all pairs)
-        save_iceberg: Save results to Iceberg table
+        limit_sponsors: Limit sponsors (for development/testing)
+        limit_tickers: Limit tickers (for development/testing)
+        model_name: Sentence-transformer embedding model
+        output_path: Local output path for results
+        skip_blocking: Skip token pre-filter (slower, more complete)
         matching_algorithm: 'greedy' or 'hungarian' (default: hungarian)
 
     Returns:
-        DataFrame with 1:1 matched candidates
+        DataFrame with 1:1 matched sponsor-ticker pairs
     """
     start_time = time.time()
-    run_id = generate_run_id()
+    analysis_id = generate_analysis_id()
 
-    print("[main] === ENTITY RESOLUTION PIPELINE ===")
-    print(f"[main] Run ID: {run_id}")
-    print(f"[main] Model: {model_name}")
-    print(
-        f"[main] Thresholds: approve≥{CONFIDENCE_AUTO_APPROVE:.0%}, "
-        f"reject<{CONFIDENCE_AUTO_REJECT:.0%}"
-    )
-    print(f"[main] Blocking: {'disabled' if skip_blocking else 'enabled'}")
-    print(f"[main] Matching: {matching_algorithm}")
+    print("=" * 70)
+    print("ENTITY RESOLUTION ANALYSIS")
+    print("=" * 70)
+    print(f"Analysis ID: {analysis_id}")
+    print(f"Model: {model_name}")
+    print(f"Confidence thresholds:")
+    print(f"  Auto-approve: ≥{CONFIDENCE_AUTO_APPROVE:.0%}")
+    print(f"  Auto-reject:  <{CONFIDENCE_AUTO_REJECT:.0%}")
+    print(f"Blocking: {'disabled (full cartesian)' if skip_blocking else 'enabled (token-based)'}")
+    print(f"Matching algorithm: {matching_algorithm}")
 
-    # === Extract ===
-    print("\n[main] === EXTRACT ===")
-    sponsors_df = fetch_sponsors(limit=limit_sponsors)
-    tickers_df = fetch_tickers(limit=limit_tickers)
+    # === Load from Warehouse ===
+    print("\n" + "=" * 70)
+    print("LOAD DATA FROM WAREHOUSE")
+    print("=" * 70)
+    sponsors_df = load_sponsors(limit=limit_sponsors)
+    tickers_df = load_tickers(limit=limit_tickers)
 
-    # === Pre-filter (Blocking) ===
-    print("\n[main] === BLOCKING ===")
+    # === Token-based Blocking ===
+    print("\n" + "=" * 70)
+    print("CANDIDATE GENERATION (BLOCKING)")
+    print("=" * 70)
     if skip_blocking:
         pair_candidates = generate_all_pairs(
             sponsors_df,
@@ -358,11 +369,13 @@ def run_pipeline(
         )
 
     if not pair_candidates:
-        print("[main] No candidate pairs. Exiting.")
+        print("No candidate pairs generated. Exiting.")
         return pl.DataFrame()
 
-    # === Score with Embeddings ===
-    print("\n[main] === SCORING ===")
+    # === Embedding & Scoring ===
+    print("\n" + "=" * 70)
+    print("SIMILARITY SCORING")
+    print("=" * 70)
     all_pairs_df = score_pairs(
         sponsors_df,
         tickers_df,
@@ -373,9 +386,11 @@ def run_pipeline(
         model_name=model_name,
     )
 
-    # === 1:1 Matching ===
-    print("\n[main] === 1:1 MATCHING ===")
-    candidates_df = select_best_matches(
+    # === Optimal Matching ===
+    print("\n" + "=" * 70)
+    print("1:1 MATCHING")
+    print("=" * 70)
+    matches_df = select_best_matches(
         all_pairs_df,
         left_key="sponsor_name",
         right_key="ticker",
@@ -383,72 +398,79 @@ def run_pipeline(
         algorithm=matching_algorithm,
     )
 
-    # Add metadata and rename columns for output
+    # Add metadata
     from datetime import datetime, timezone
 
-    candidates_df = candidates_df.with_columns(
+    matches_df = matches_df.with_columns(
         [
-            pl.lit(run_id).alias("run_id"),
+            pl.lit(analysis_id).alias("analysis_id"),
             pl.lit(datetime.now(timezone.utc)).alias("created_at"),
         ]
     )
 
-    # Rename 'name' to 'ticker_name' for clarity in output
-    if "name" in candidates_df.columns:
-        candidates_df = candidates_df.rename({"name": "ticker_name"})
+    # Rename columns for clarity
+    if "name" in matches_df.columns:
+        matches_df = matches_df.rename({"name": "ticker_name"})
 
-    # === Save Output ===
-    print("\n[main] === OUTPUT ===")
+    # === Save Results Locally ===
+    print("\n" + "=" * 70)
+    print("SAVE RESULTS")
+    print("=" * 70)
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-    candidates_df.write_parquet(output_path)
-    print(f"[main] Saved to {output_path}")
+    matches_df.write_parquet(output_path)
+    print(f"Saved to: {output_path}")
+    print(f"Total matches: {len(matches_df)}")
 
-    # Save to Iceberg if requested
-    if save_iceberg:
-        from .load import save_candidates_iceberg
-
-        save_candidates_iceberg(candidates_df)
-
-    # Summary
+    # Summary statistics
     elapsed = time.time() - start_time
-    approved = (candidates_df["status"] == STATUS_APPROVED).sum()
-    pending = (candidates_df["status"] == STATUS_PENDING).sum()
+    approved = (matches_df["status"] == STATUS_APPROVED).sum()
+    pending = (matches_df["status"] == STATUS_PENDING).sum()
+    avg_confidence = matches_df["confidence"].mean()
 
-    print("\n[main] === COMPLETE ===")
-    print(f"[main] Time: {elapsed:.1f}s")
-    print(f"[main] Run ID: {run_id}")
-    print(f"[main] Results: {len(candidates_df)} unique 1:1 matches")
-    print(f"[main]   - Auto-approved: {approved}")
-    print(f"[main]   - Pending review: {pending}")
+    print("\n" + "=" * 70)
+    print("ANALYSIS COMPLETE")
+    print("=" * 70)
+    print(f"Time: {elapsed:.1f}s")
+    print(f"Analysis ID: {analysis_id}")
+    print(f"Total matches: {len(matches_df)}")
+    print(f"  Auto-approved (≥{CONFIDENCE_AUTO_APPROVE:.0%}): {approved}")
+    print(f"  Pending review: {pending}")
+    print(f"  Average confidence: {avg_confidence:.3f}")
 
-    # Top matches
-    if len(candidates_df) > 0:
-        print("\n[main] Top 15 matches:")
-        for row in candidates_df.head(15).iter_rows(named=True):
+    # Show top matches
+    if len(matches_df) > 0:
+        print(f"\nTop 15 highest-confidence matches:")
+        for i, row in enumerate(matches_df.head(15).iter_rows(named=True), 1):
             icon = "✓" if row["status"] == STATUS_APPROVED else "?"
+            ticker_name = row.get("ticker_name", "")[:30]
             print(
-                f"  {icon} {row['confidence']:.3f} | "
-                f"{row['sponsor_name'][:40]:<40} → {row['ticker']} ({row['ticker_name'][:30]})"
+                f"  {i:2}. {icon} {row['confidence']:.3f} | "
+                f"{row['sponsor_name'][:40]:<40} → {row['ticker']:6} ({ticker_name})"
             )
 
-    return candidates_df
+    print(f"\n💡 Next steps:")
+    print(f"  1. Evaluate: python scripts/evaluate_predictions.py --predictions {output_path}")
+    print(f"  2. Label more: python scripts/label_helper.py")
+    print(f"  3. Iterate: Adjust blocking, embeddings, or thresholds")
+
+    return matches_df
 
 
 if __name__ == "__main__":
+    # Parse environment configuration
     limit_sponsors = int(os.environ.get("LIMIT_SPONSORS", 0)) or None
     limit_tickers = int(os.environ.get("LIMIT_TICKERS", 0)) or None
     model_name = os.environ.get("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
-    output_path = os.environ.get("OUTPUT_PATH", "data/candidates.parquet")
+    output_path = os.environ.get("OUTPUT_PATH", "data/entity_matches.parquet")
     skip_blocking = os.environ.get("SKIP_BLOCKING", "0") == "1"
-    save_iceberg = os.environ.get("SAVE_ICEBERG", "0") == "1"
     matching_algorithm = os.environ.get("MATCHING_ALGORITHM", "hungarian")
 
-    run_pipeline(
+    # Run analysis
+    analyze_entity_matches(
         limit_sponsors=limit_sponsors,
         limit_tickers=limit_tickers,
         model_name=model_name,
         output_path=output_path,
         skip_blocking=skip_blocking,
-        save_iceberg=save_iceberg,
         matching_algorithm=matching_algorithm,
     )
