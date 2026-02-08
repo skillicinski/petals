@@ -27,9 +27,13 @@ AGENTS.md
 
 # Local data/output
 /data/
-# But allow evaluation ground truth data in source code
-!src/analytics/entity_resolution/data/
 notebooks/
 notes/
 tmp/
 analysis/output/
+
+# ruff
+.ruff_cache/
+
+# pytest
+.pytest_cache/

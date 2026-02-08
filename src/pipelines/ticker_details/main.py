@@ -2,19 +2,19 @@
 Main entry point for ticker details enrichment pipeline.
 
 Reads tickers from market.tickers table, fetches detailed information
-from Massive API, and loads to market.ticker_details table.
+using yfinance (free, no rate limits), and loads to market.ticker_details table.
 
 Filters to US stock tickers only. Industry filtering (e.g., pharma/biotech)
-is handled downstream in entity_match using SIC codes.
+is handled downstream in entity_match using industry/sector fields.
 
 Change Detection:
 - Compares last_updated_utc (tickers) vs last_fetched_utc (ticker_details)
 - Only fetches details for tickers that are new or have been updated
 - No separate "incremental" mode needed - always efficient
 
-Rate Limiting:
-- Respects Massive free tier limit (5 calls/min)
-- Initial backfill for ~15,000 US stock tickers takes ~54 hours
+Performance:
+- yfinance has no rate limits (unofficial but observed)
+- Initial backfill for ~15,000 US stock tickers takes ~2 hours
 - Subsequent runs only fetch changed tickers (typically minutes)
 """
 
@@ -145,12 +145,11 @@ def get_tickers_to_enrich(
 
 
 def run(
-    api_key: str | None = None,
     table_bucket_arn: str | None = None,
     region: str = "us-east-1",
-    rate_limit_delay: float = 13.0,
-    load_batch_size: int = 10,  # Small batches for frequent writes
-    **_kwargs,  # Accept but ignore force_full, last_run_time for backwards compat
+    batch_delay: float = 0.5,  # Respectful delay between requests
+    load_batch_size: int = 100,  # Flush to S3 Tables every 100 tickers
+    **_kwargs,  # Accept but ignore extra params for backwards compat
 ) -> dict:
     """
     Run the ticker details enrichment pipeline.
@@ -160,28 +159,20 @@ def run(
     ticker_details table). Only fetches details for new or updated tickers.
 
     Args:
-        api_key: Massive API key (or set MASSIVE_API_KEY env var)
         table_bucket_arn: S3 Table Bucket ARN (or set TABLE_BUCKET_ARN env var)
         region: AWS region
-        rate_limit_delay: Seconds between API calls (13s = under 5/min limit)
+        batch_delay: Seconds between yfinance requests (default 0.5s)
         load_batch_size: How often to flush to S3 Tables
 
     Returns:
         Stats dict with rows_inserted and rows_updated counts
     """
-    api_key = api_key or os.environ.get("MASSIVE_API_KEY")
-    if not api_key:
-        raise ValueError("MASSIVE_API_KEY required")
-
     table_bucket_arn = table_bucket_arn or os.environ.get("TABLE_BUCKET_ARN")
     if not table_bucket_arn:
         raise ValueError("TABLE_BUCKET_ARN required")
 
-    # Allow overriding rate limit delay via env var
-    rate_limit_delay = float(os.environ.get("RATE_LIMIT_DELAY", rate_limit_delay))
-
     log("[main] Pipeline starting")
-    log(f"[main] rate_limit_delay={rate_limit_delay}s")
+    log(f"[main] batch_delay={batch_delay}s")
     log_memory("startup")
 
     # Get tickers to enrich (automatically skips tickers with up-to-date details)
@@ -195,10 +186,10 @@ def run(
         return {"rows_inserted": 0, "rows_updated": 0}
 
     # Estimate time
-    est_hours = len(tickers) * rate_limit_delay / 3600
+    est_minutes = len(tickers) * batch_delay / 60
     log(
-        f"[main] Estimated time: {est_hours:.1f} hours "
-        f"({len(tickers)} tickers × {rate_limit_delay}s)"
+        f"[main] Estimated time: {est_minutes:.1f} minutes "
+        f"({len(tickers)} tickers × {batch_delay}s)"
     )
 
     # Fetch and load in batches
@@ -209,8 +200,7 @@ def run(
     log("[main] Starting extraction and loading...")
     for detail in fetch_ticker_details_batch(
         tickers=tickers,
-        api_key=api_key,
-        rate_limit_delay=rate_limit_delay,
+        batch_delay=batch_delay,
     ):
         batch.append(detail)
 

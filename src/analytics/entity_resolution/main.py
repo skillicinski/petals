@@ -291,9 +291,15 @@ def score_pairs(
     df = df.sort("confidence", descending=True)
 
     print(f"Scored {len(df)} candidate pairs")
-    print(f"  High confidence (≥{CONFIDENCE_AUTO_APPROVE:.0%}): {(df['confidence'] >= CONFIDENCE_AUTO_APPROVE).sum()}")
-    print(f"  Medium confidence: {((df['confidence'] >= CONFIDENCE_AUTO_REJECT) & (df['confidence'] < CONFIDENCE_AUTO_APPROVE)).sum()}")
-    print(f"  Low confidence (<{CONFIDENCE_AUTO_REJECT:.0%}): {(df['confidence'] < CONFIDENCE_AUTO_REJECT).sum()}")
+    print(
+        f"  High confidence (≥{CONFIDENCE_AUTO_APPROVE:.0%}): {(df['confidence'] >= CONFIDENCE_AUTO_APPROVE).sum()}"
+    )
+    print(
+        f"  Medium confidence: {((df['confidence'] >= CONFIDENCE_AUTO_REJECT) & (df['confidence'] < CONFIDENCE_AUTO_APPROVE)).sum()}"
+    )
+    print(
+        f"  Low confidence (<{CONFIDENCE_AUTO_REJECT:.0%}): {(df['confidence'] < CONFIDENCE_AUTO_REJECT).sum()}"
+    )
 
     return df
 

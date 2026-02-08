@@ -122,14 +122,14 @@ class TestEventBridgeSchedule:
         """Schedule rule is created with correct name."""
         template.has_resource_properties(
             "AWS::Events::Rule",
-            {"Name": "petals-trials-daily"},
+            {"Name": "petals-trials-weekly"},
         )
 
-    def test_schedule_is_daily_7am_utc(self, template):
-        """Schedule runs daily at 7 AM UTC (offset from tickers at 6 AM)."""
+    def test_schedule_is_weekly_saturday_8am_utc(self, template):
+        """Schedule runs weekly on Saturdays at 8 AM UTC."""
         template.has_resource_properties(
             "AWS::Events::Rule",
-            {"ScheduleExpression": "cron(0 7 ? * * *)"},
+            {"ScheduleExpression": "cron(0 8 ? * SAT *)"},
         )
 
 

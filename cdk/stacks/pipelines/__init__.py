@@ -1,13 +1,13 @@
 """Pipeline CDK stacks."""
 
-from .entity_match import EntityMatchPipelineStack
 from .ticker_details import TickerDetailsPipelineStack
+from .ticker_prices import TickerPricesPipelineStack
 from .tickers import TickersPipelineStack
 from .trials import TrialsPipelineStack
 
 __all__ = [
-    "EntityMatchPipelineStack",
     "TickerDetailsPipelineStack",
+    "TickerPricesPipelineStack",
     "TickersPipelineStack",
     "TrialsPipelineStack",
 ]

@@ -20,16 +20,16 @@ from pyiceberg.types import DoubleType, LongType, NestedField, StringType
 # Schema for ticker prices (OHLC)
 # (ticker, date) composite key
 TICKER_PRICES_SCHEMA = Schema(
-    NestedField(1, 'ticker', StringType(), required=True),
-    NestedField(2, 'date', StringType(), required=True),
-    NestedField(3, 'open', DoubleType(), required=False),
-    NestedField(4, 'high', DoubleType(), required=False),
-    NestedField(5, 'low', DoubleType(), required=False),
-    NestedField(6, 'close', DoubleType(), required=False),
-    NestedField(7, 'volume', LongType(), required=False),
-    NestedField(8, 'last_fetched_utc', StringType(), required=False),
-    NestedField(10, 'locale', StringType(), required=False),
-    NestedField(9, 'market', StringType(), required=False),
+    NestedField(1, "ticker", StringType(), required=True),
+    NestedField(2, "date", StringType(), required=True),
+    NestedField(3, "open", DoubleType(), required=False),
+    NestedField(4, "high", DoubleType(), required=False),
+    NestedField(5, "low", DoubleType(), required=False),
+    NestedField(6, "close", DoubleType(), required=False),
+    NestedField(7, "volume", LongType(), required=False),
+    NestedField(8, "last_fetched_utc", StringType(), required=False),
+    NestedField(10, "locale", StringType(), required=False),
+    NestedField(9, "market", StringType(), required=False),
     identifier_field_ids=[1, 2],
 )
 
@@ -40,7 +40,7 @@ TICKER_PRICES_PARTITION_SPEC = PartitionSpec(
         source_id=2,  # field id for 'date' column
         field_id=1000,
         transform=TruncateTransform(7),  # Truncate to 7 chars (YYYY-MM)
-        name='date_month'
+        name="date_month",
     )
 )
 
@@ -100,9 +100,7 @@ def ensure_namespace(catalog, namespace: str) -> None:
             raise
 
 
-def evolve_schema(
-    catalog, table_id: str, target_schema: Schema
-) -> None:
+def evolve_schema(catalog, table_id: str, target_schema: Schema) -> None:
     """
     Evolve table schema to match target schema by adding missing columns.
 
@@ -292,17 +290,15 @@ def load_ticker_prices(
         return {"rows_inserted": total_inserted, "rows_updated": total_updated}
 
     except NoSuchTableError:
-        log(f'[load] Creating table: {table_id}')
+        log(f"[load] Creating table: {table_id}")
         table = catalog.create_table(
-            table_id,
-            schema=TICKER_PRICES_SCHEMA,
-            partition_spec=TICKER_PRICES_PARTITION_SPEC
+            table_id, schema=TICKER_PRICES_SCHEMA, partition_spec=TICKER_PRICES_PARTITION_SPEC
         )
-        log('[load] Table created with monthly partitioning on date column')
-        log('[load] Appending data...')
+        log("[load] Table created with monthly partitioning on date column")
+        log("[load] Appending data...")
         table.append(arrow_table)
-        log(f'[load] Initial load complete: {deduped_count:,} records')
-        return {'rows_inserted': deduped_count, 'rows_updated': 0}
+        log(f"[load] Initial load complete: {deduped_count:,} records")
+        return {"rows_inserted": deduped_count, "rows_updated": 0}
 
     except Exception as e:
         log(f"[load] FATAL ERROR: {type(e).__name__}: {e}")

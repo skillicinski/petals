@@ -45,11 +45,11 @@ class TestBatchCompute:
         )
 
     def test_job_has_long_timeout(self, template):
-        """Job definition has long timeout for full backfill (6 days)."""
+        """Job definition has 12 hour timeout for full backfill."""
         template.has_resource_properties(
             "AWS::Batch::JobDefinition",
             {
-                "Timeout": {"AttemptDurationSeconds": 518400},  # 6 days
+                "Timeout": {"AttemptDurationSeconds": 43200},  # 12 hours
             },
         )
 
@@ -161,14 +161,14 @@ class TestEventBridgeSchedule:
         """Schedule rule is created with correct name."""
         template.has_resource_properties(
             "AWS::Events::Rule",
-            {"Name": "petals-ticker-details-daily"},
+            {"Name": "petals-ticker-details-weekly"},
         )
 
-    def test_schedule_is_daily_7am_utc(self, template):
-        """Schedule runs daily at 7 AM UTC (1 hour after tickers)."""
+    def test_schedule_is_weekly_saturday_7am_utc(self, template):
+        """Schedule runs weekly on Saturdays at 7 AM UTC."""
         template.has_resource_properties(
             "AWS::Events::Rule",
-            {"ScheduleExpression": "cron(0 7 ? * * *)"},
+            {"ScheduleExpression": "cron(0 7 ? * SAT *)"},
         )
 
 

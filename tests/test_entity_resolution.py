@@ -132,7 +132,7 @@ class TestMainPipeline:
             }
         )
 
-        result = select_best_matches(df, min_confidence=0.0)
+        result = select_best_matches(df, min_confidence=0.0, algorithm="greedy")
 
         assert len(result) == 2
         pairs = set(zip(result["sponsor_name"].to_list(), result["ticker"].to_list()))

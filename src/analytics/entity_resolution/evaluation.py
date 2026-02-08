@@ -110,6 +110,7 @@ def load_ground_truth(path: str | None = None) -> pl.DataFrame:
     # Use packaged dataset by default
     if path is None:
         from .data import GROUND_TRUTH_PATH
+
         path = str(GROUND_TRUTH_PATH)
 
     if path.endswith(".csv"):
@@ -228,11 +229,7 @@ def compute_metrics_at_k(
         EvaluationMetrics computed on top-K predictions
     """
     # For each sponsor, keep only top K predictions by confidence
-    top_k = (
-        predictions.sort("confidence", descending=True)
-        .group_by("sponsor_name")
-        .head(k)
-    )
+    top_k = predictions.sort("confidence", descending=True).group_by("sponsor_name").head(k)
 
     return compute_metrics(top_k, ground_truth, min_confidence=0.0)
 
@@ -320,9 +317,7 @@ def print_confusion_examples(
 
     elif category == "fn":
         # False Negatives: labeled correct but not predicted
-        examples = joined.filter(
-            pl.col("confidence").is_null() & (pl.col("label") == "correct")
-        )
+        examples = joined.filter(pl.col("confidence").is_null() & (pl.col("label") == "correct"))
         print(f"\n=== FALSE NEGATIVES (missed correct matches) - Top {limit} ===")
 
     else:
@@ -335,7 +330,7 @@ def print_confusion_examples(
     for i, row in enumerate(examples.head(limit).iter_rows(named=True)):
         conf = f"{row.get('confidence', 0):.3f}" if row.get("confidence") else "N/A"
         label = row.get("label", "unlabeled")
-        print(f"{i+1}. [{conf}] {row['sponsor_name'][:50]:50} → {row['ticker']:6} ({label})")
+        print(f"{i + 1}. [{conf}] {row['sponsor_name'][:50]:50} → {row['ticker']:6} ({label})")
 
 
 def generate_evaluation_report(
@@ -360,8 +355,7 @@ def generate_evaluation_report(
 
     # Compute metrics at different K values
     metrics_at_k = {
-        k: compute_metrics_at_k(predictions, ground_truth, k=k)
-        for k in [1, 3, 5, 10, 20]
+        k: compute_metrics_at_k(predictions, ground_truth, k=k) for k in [1, 3, 5, 10, 20]
     }
 
     # Threshold analysis

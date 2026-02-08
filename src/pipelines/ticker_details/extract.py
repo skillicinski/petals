@@ -1,191 +1,145 @@
 """
-Ticker details extraction from Massive (formerly Polygon.io) API.
+Ticker details extraction using yfinance.
 
-Fetches detailed information for each ticker including SIC codes,
+Fetches detailed information for each ticker including industry, sector,
 descriptions, and other metadata useful for entity matching.
 
 Rate Limiting
 =============
-Massive free tier allows 5 calls/minute. This pipeline respects that limit
-with configurable delays between requests. For ~15,000 US stock tickers,
-initial backfill takes ~54 hours.
+yfinance has no official rate limits, making this much faster than the
+previous Polygon API approach. For ~15,000 US stock tickers, extraction
+takes approximately 2 hours vs 54 hours with Polygon.
 
 Incremental Fetching
 ====================
 For incremental runs, we only fetch details for tickers that have been
 updated since the last run (based on last_updated_utc from tickers table).
 
-404 Handling
-============
-When the API returns 404 (ticker not found), we write a minimal record with
-only ticker, market, and last_fetched_utc. This prevents re-attempting the
-same 404s on future runs, significantly reducing wasted API calls.
+Error Handling
+==============
+When yfinance cannot fetch ticker info (delisted, invalid, etc.), we write
+a minimal record with only ticker, market, and last_fetched_utc. This prevents
+re-attempting failed tickers on future runs.
 """
 
-import json
 import time
-import urllib.error
-import urllib.request
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Iterator
 
+import yfinance as yf
 
-def fetch_ticker_details(
-    ticker: str,
-    api_key: str,
-    max_retries: int = 5,
-    base_delay: float = 15.0,
-) -> dict | None:
+
+def fetch_ticker_details(ticker: str) -> dict | None:
     """
-    Fetch detailed information for a single ticker from Massive API.
+    Fetch detailed information for a single ticker using yfinance.
 
     Args:
         ticker: The ticker symbol to fetch
-        api_key: Massive API key
-        max_retries: Max retries on rate limit (429)
-        base_delay: Base delay for exponential backoff on rate limit
 
     Returns:
-        Dict with ticker details or None if ticker not found
+        Dict with ticker info or None if ticker not found/error
     """
-    url = f"https://api.polygon.io/v3/reference/tickers/{ticker}?apiKey={api_key}"
+    try:
+        yf_ticker = yf.Ticker(ticker)
+        info = yf_ticker.info
 
-    for attempt in range(max_retries):
-        try:
-            req = urllib.request.Request(url)
-            with urllib.request.urlopen(req, timeout=30) as response:
-                data = json.loads(response.read().decode("utf-8"))
-                return data.get("results", {})
-        except urllib.error.HTTPError as e:
-            if e.code == 404:
-                return None
-            elif e.code == 429:
-                wait = base_delay * (2**attempt)
-                print(
-                    f"  Rate limited on {ticker}, waiting {wait:.0f}s "
-                    f"(attempt {attempt + 1}/{max_retries})..."
-                )
-                time.sleep(wait)
-            else:
-                print(f"  HTTP {e.code} fetching {ticker}: {e.reason}")
-                return None
-        except urllib.error.URLError as e:
-            print(f"  Network error fetching {ticker}: {e.reason}")
-            if attempt < max_retries - 1:
-                time.sleep(base_delay)
-            else:
-                return None
-        except Exception as e:
-            print(f"  Unexpected error fetching {ticker}: {e}")
+        # Check if we got valid data (yfinance returns empty dict or minimal data on error)
+        if not info or not info.get("symbol"):
             return None
 
-    print(f"  Max retries exceeded for {ticker}")
-    return None
+        return info
+    except Exception as e:
+        print(f"  Error fetching {ticker}: {e}")
+        return None
 
 
-def _extract_detail_fields(ticker: str, market: str, details: dict) -> dict:
+def _extract_detail_fields(ticker: str, market: str, info: dict) -> dict:
     """
-    Extract and flatten relevant fields from API response.
+    Extract and flatten relevant fields from yfinance info dict.
 
     Args:
         ticker: The ticker symbol
         market: The market (from source tickers table)
-        details: Raw API response
+        info: yfinance info dict
 
     Returns:
         Flattened dict ready for loading
     """
-    # Extract address fields
-    address = details.get("address", {})
-
     return {
         "ticker": ticker,
         "market": market,
-        "name": details.get("name"),
-        "sic_code": details.get("sic_code"),
-        "sic_description": details.get("sic_description"),
-        "description": details.get("description"),
-        "homepage_url": details.get("homepage_url"),
-        "market_cap": details.get("market_cap"),
-        "total_employees": details.get("total_employees"),
-        "list_date": details.get("list_date"),
-        "locale": details.get("locale"),
-        "primary_exchange": details.get("primary_exchange"),
-        "currency_name": details.get("currency_name"),
-        "cik": details.get("cik"),
-        "composite_figi": details.get("composite_figi"),
-        "share_class_figi": details.get("share_class_figi"),
-        "address_city": address.get("city"),
-        "address_state": address.get("state"),
-        "address_country": address.get("country") if address else details.get("locale"),
-        "last_fetched_utc": datetime.utcnow().isoformat() + "Z",
+        "name": info.get("longName") or info.get("shortName"),
+        "description": info.get("longBusinessSummary"),
+        "homepage_url": info.get("website"),
+        "market_cap": info.get("marketCap"),
+        "total_employees": info.get("fullTimeEmployees"),
+        "locale": info.get("country"),
+        "primary_exchange": info.get("exchange"),
+        "currency_name": info.get("currency"),
+        "address_city": info.get("city"),
+        "address_state": info.get("state"),
+        "address_country": info.get("country"),
+        "industry": info.get("industry"),
+        "sector": info.get("sector"),
+        "last_fetched_utc": datetime.now(UTC).isoformat(),
     }
 
 
 def fetch_ticker_details_batch(
     tickers: list[tuple[str, str]],  # List of (ticker, market) tuples
-    api_key: str,
-    rate_limit_delay: float = 13.0,
-    max_retries: int = 5,
-    progress_interval: int = 10,  # Log progress every 10 tickers (~2 min)
+    progress_interval: int = 100,  # Log progress every 100 tickers
+    batch_delay: float = 0.5,  # Small delay between requests to be respectful
 ) -> Iterator[dict]:
     """
-    Fetch details for a batch of tickers, respecting rate limits.
+    Fetch details for a batch of tickers using yfinance.
 
-    Always yields a record for each ticker (even on 404) so that future runs
-    can skip tickers where the API has no details available.
+    Always yields a record for each ticker (even on error) so that future runs
+    can skip tickers where data is unavailable.
 
     Args:
         tickers: List of (ticker, market) tuples to fetch
-        api_key: Massive API key
-        rate_limit_delay: Seconds between requests (13s keeps us under 5/min)
-        max_retries: Max retries per ticker on rate limit
         progress_interval: How often to log progress
+        batch_delay: Seconds between requests (small delay to be respectful)
 
     Yields:
-        Dict with ticker details (or minimal record with only ticker/market/last_fetched_utc on 404)
+        Dict with ticker details (or minimal record on error)
     """
     total = len(tickers)
     fetched = 0
     skipped = 0
 
-    print(f"Fetching details for {total} tickers...")
-    print(f"Rate limit delay: {rate_limit_delay}s between requests")
-    print(f"Estimated time: {total * rate_limit_delay / 3600:.1f} hours")
-    print("Note: All tickers get a record (even 404s) to optimize future runs")
+    print(f"Fetching details for {total} tickers using yfinance...")
+    print(f"Estimated time: {total * batch_delay / 60:.1f} minutes")
+    print("Note: All tickers get a record (even errors) to optimize future runs")
 
     for i, (ticker, market) in enumerate(tickers):
-        if i > 0:
-            time.sleep(rate_limit_delay)
+        if i > 0 and batch_delay > 0:
+            time.sleep(batch_delay)
 
-        details = fetch_ticker_details(ticker, api_key, max_retries=max_retries)
+        info = fetch_ticker_details(ticker)
 
-        if details:
-            yield _extract_detail_fields(ticker, market, details)
+        if info:
+            yield _extract_detail_fields(ticker, market, info)
             fetched += 1
         else:
-            # Yield minimal record (404/not found) so we skip this ticker on future runs
+            # Yield minimal record (error/not found) so we skip this ticker on future runs
             yield {
                 "ticker": ticker,
                 "market": market,
                 "name": None,
-                "sic_code": None,
-                "sic_description": None,
                 "description": None,
                 "homepage_url": None,
                 "market_cap": None,
                 "total_employees": None,
-                "list_date": None,
                 "locale": None,
                 "primary_exchange": None,
                 "currency_name": None,
-                "cik": None,
-                "composite_figi": None,
-                "share_class_figi": None,
                 "address_city": None,
                 "address_state": None,
                 "address_country": None,
-                "last_fetched_utc": datetime.utcnow().isoformat() + "Z",
+                "industry": None,
+                "sector": None,
+                "last_fetched_utc": datetime.now(UTC).isoformat(),
             }
             skipped += 1
 
@@ -193,22 +147,25 @@ def fetch_ticker_details_batch(
             elapsed_pct = 100 * (i + 1) / total
             print(
                 f"Progress: {i + 1}/{total} ({elapsed_pct:.1f}%) "
-                f"- with details: {fetched}, no details (404): {skipped}"
+                f"- with details: {fetched}, no details: {skipped}"
             )
 
-    print(f"Fetch complete: {fetched} with details, {skipped} not found (404s)")
+    print(f"Fetch complete: {fetched} with details, {skipped} not found")
 
 
 if __name__ == "__main__":
-    import os
-
-    api_key = os.environ.get("MASSIVE_API_KEY")
-    if not api_key:
-        print("MASSIVE_API_KEY environment variable required")
-        exit(1)
-
     # Test with a few known tickers
-    test_tickers = [("PFE", "stocks"), ("JNJ", "stocks"), ("INVALID123", "stocks")]
+    test_tickers = [
+        ("PFE", "stocks"),
+        ("JNJ", "stocks"),
+        ("MRNA", "stocks"),
+        ("INVALID123", "stocks"),
+    ]
 
-    for record in fetch_ticker_details_batch(test_tickers, api_key, rate_limit_delay=1.0):
-        print(f"{record['ticker']}: SIC={record['sic_code']} - {record['name'][:40]}...")
+    print("Testing yfinance extraction:")
+    for record in fetch_ticker_details_batch(test_tickers, batch_delay=0.5):
+        name = record.get("name") or "N/A"
+        industry = record.get("industry") or "N/A"
+        if name != "N/A" and len(name) > 40:
+            name = name[:40] + "..."
+        print(f"{record['ticker']:10s}: {name:45s} | {industry}")

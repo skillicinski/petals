@@ -45,7 +45,7 @@ class TestLoadGroundTruth:
     def test_missing_required_columns(self, tmp_path):
         """Raise error if required columns missing."""
         csv_path = tmp_path / "test.csv"
-        csv_path.write_text("sponsor_name,ticker\n" '"Pfizer Inc",PFE\n')
+        csv_path.write_text('sponsor_name,ticker\n"Pfizer Inc",PFE\n')
 
         with pytest.raises(ValueError, match="Missing required columns"):
             load_ground_truth(str(csv_path))
@@ -54,7 +54,7 @@ class TestLoadGroundTruth:
         """Raise error if invalid label values."""
         csv_path = tmp_path / "test.csv"
         csv_path.write_text(
-            "sponsor_name,ticker,label\n" '"Pfizer Inc",PFE,maybe\n'  # Invalid label
+            'sponsor_name,ticker,label\n"Pfizer Inc",PFE,maybe\n'  # Invalid label
         )
 
         with pytest.raises(ValueError, match="Invalid labels found"):

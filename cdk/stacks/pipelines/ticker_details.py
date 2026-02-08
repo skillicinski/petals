@@ -5,15 +5,15 @@ Components:
 - Batch compute environment (Fargate On-Demand for reliability)
 - Batch job queue and job definition
 - Step Functions state machine for orchestration (with DynamoDB lock)
-- EventBridge rule for daily scheduling (1 hour after tickers pipeline)
+- EventBridge rule for weekly scheduling
 
 Concurrency Control:
 - Uses a DynamoDB 'running' flag to prevent concurrent executions
 - If an execution is already running, new executions skip gracefully
 - Lock is released on both success and failure
 
-Note: Initial backfill for ~35k US stock tickers takes ~123 hours due to
-API rate limiting. Subsequent runs only process new/changed tickers.
+Note: Uses yfinance (no API key required). Initial backfill for ~35k US
+stock tickers takes ~4-5 hours. Subsequent runs only process new/changed tickers.
 """
 
 from aws_cdk import (
@@ -34,7 +34,6 @@ from aws_cdk import aws_events_targets as targets
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_lambda as lambda_
 from aws_cdk import aws_logs as logs
-from aws_cdk import aws_secretsmanager as secretsmanager
 from aws_cdk import aws_stepfunctions as sfn
 from aws_cdk import aws_stepfunctions_tasks as tasks
 from constructs import Construct
@@ -111,19 +110,10 @@ class TickerDetailsPipelineStack(Stack):
             memory_size=128,
             environment={
                 "STATE_TABLE_NAME": "petals-pipeline-state",
-                "MAX_LOCK_AGE_HOURS": "168",  # 7 days (job timeout is 6 days)
+                "MAX_LOCK_AGE_HOURS": "24",  # 24 hours (job timeout is 12 hours)
             },
         )
         self.state_table.grant_read_data(self.check_lock_fn)
-
-        # =================================================================
-        # Secrets (API Key)
-        # =================================================================
-        self.api_secret = secretsmanager.Secret.from_secret_name_v2(
-            self,
-            "MassiveApiKey",
-            "petals/Massive",
-        )
 
         # =================================================================
         # ECR Repository (imported from SharedStack)
@@ -146,7 +136,7 @@ class TickerDetailsPipelineStack(Stack):
 
         # =================================================================
         # Batch Compute Environment (On-Demand for reliability)
-        # Long-running job (~8+ hours), Spot interruption risk too high
+        # Typical job duration: 4-5 hours for full backfill
         # =================================================================
         self.compute_env = batch.FargateComputeEnvironment(
             self,
@@ -154,7 +144,7 @@ class TickerDetailsPipelineStack(Stack):
             compute_environment_name="petals-ticker-details-compute",
             vpc=self.vpc,
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
-            spot=False,  # On-Demand - only ~$0.16 more for full backfill
+            spot=False,  # On-Demand for reliability
             maxv_cpus=4,
         )
 
@@ -175,6 +165,7 @@ class TickerDetailsPipelineStack(Stack):
 
         # =================================================================
         # Batch Job Role (for the container)
+        # No API key needed - yfinance is free
         # =================================================================
         self.job_role = iam.Role(
             self,
@@ -194,12 +185,9 @@ class TickerDetailsPipelineStack(Stack):
             )
         )
 
-        # Secret access
-        self.api_secret.grant_read(self.job_role)
-
         # =================================================================
         # Batch Job Definition
-        # Long timeout for initial backfill (~8+ hours due to rate limiting)
+        # Timeout: 12 hours (much shorter than previous 6 days with Polygon)
         # =================================================================
         self.job_definition = batch.EcsJobDefinition(
             self,
@@ -227,14 +215,9 @@ class TickerDetailsPipelineStack(Stack):
                     "AWS_DEFAULT_REGION": self.region,
                     "PIPELINE": "src.pipelines.ticker_details.main",
                 },
-                secrets={
-                    "MASSIVE_API_KEY": batch.Secret.from_secrets_manager(
-                        self.api_secret, "Default"
-                    ),
-                },
                 assign_public_ip=True,
             ),
-            timeout=Duration.days(6),  # ~144 hours for full US stock backfill
+            timeout=Duration.hours(12),  # 12 hours for full US stock backfill
             retry_attempts=1,
         )
 
@@ -365,7 +348,7 @@ class TickerDetailsPipelineStack(Stack):
             "TickerDetailsPipelineStateMachine",
             state_machine_name="petals-ticker-details-pipeline",
             definition_body=sfn.DefinitionBody.from_chainable(definition),
-            timeout=Duration.days(7),  # Slightly longer than job timeout
+            timeout=Duration.hours(13),  # Slightly longer than job timeout
             tracing_enabled=True,
         )
 
