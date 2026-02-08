@@ -110,6 +110,8 @@ def load_tickers(
         - name: str - Company name
         - market: str - Market type (stocks, etf, etc.)
         - description: str - Company description (may be null)
+        - industry: str - Industry classification (may be null)
+        - sector: str - Sector classification (may be null)
 
     Example:
         >>> tickers = load_tickers(market_filter="stocks", limit=500)
@@ -123,9 +125,9 @@ def load_tickers(
     if market_filter:
         row_filter += f" AND market = '{market_filter}'"
 
-    # Scan for ticker details
+    # Scan for ticker details (now includes industry and sector)
     scan = table.scan(
-        selected_fields=["ticker", "name", "market", "description"],
+        selected_fields=["ticker", "name", "market", "description", "industry", "sector"],
         row_filter=row_filter,
     )
 

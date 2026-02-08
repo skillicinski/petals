@@ -54,24 +54,73 @@ from .load import load_sponsors, load_tickers
 from .matching import greedy_matching, hungarian_matching
 
 # Lazy import to avoid loading torch until needed
-_model = None
+# Cache models by name to avoid reloading
+_model_cache: dict[str, any] = {}
 
 
 def get_embedding_model(model_name: str = "all-MiniLM-L6-v2"):
-    """Load sentence-transformer model (cached after first call).
+    """Load sentence-transformer model (cached per model name).
+
+    Models are cached by name to avoid reloading. This allows switching
+    between models without redownloading.
 
     Default model: all-MiniLM-L6-v2
     - Size: ~80MB
     - Embedding dim: 384
     - Speed: ~14k sentences/sec on CPU
     """
-    global _model
-    if _model is None:
+    if model_name not in _model_cache:
         from sentence_transformers import SentenceTransformer
 
         print(f"Loading embedding model: {model_name}")
-        _model = SentenceTransformer(model_name)
-    return _model
+        _model_cache[model_name] = SentenceTransformer(model_name)
+
+    return _model_cache[model_name]
+
+
+def build_enriched_text(
+    name: str,
+    description: str | None = None,
+    industry: str | None = None,
+    sector: str | None = None,
+) -> str:
+    """Build enriched text representation for entity matching.
+
+    Combines name with additional semantic context (description, industry, sector)
+    to provide richer information for embedding models.
+
+    Args:
+        name: Entity name (required)
+        description: Entity description (optional)
+        industry: Industry classification (optional)
+        sector: Sector classification (optional)
+
+    Returns:
+        Enriched text string
+
+    Example:
+        >>> text = build_enriched_text(
+        ...     "Pfizer Inc.",
+        ...     "Pharmaceutical company",
+        ...     "Drug Manufacturers",
+        ...     "Healthcare"
+        ... )
+        >>> # "Pfizer Inc. Pharmaceutical company. Industry: Drug Manufacturers. Sector: Healthcare."
+    """
+    parts = [name]
+
+    if description:
+        # Truncate long descriptions
+        desc = description[:200] if len(description) > 200 else description
+        parts.append(desc)
+
+    if industry:
+        parts.append(f"Industry: {industry}")
+
+    if sector:
+        parts.append(f"Sector: {sector}")
+
+    return ". ".join(parts) + "."
 
 
 def compute_embeddings(
@@ -240,12 +289,24 @@ def score_pairs(
     }
 
     # Extract texts for embedding
+    # Left side: just sponsor names
     left_texts = left_entities
-    right_texts = [right_lookup[k][right_text] for k in right_entities]
+
+    # Right side: enriched text with description, industry, sector
+    right_texts = []
+    for key in right_entities:
+        row = right_lookup[key]
+        enriched = build_enriched_text(
+            name=row[right_text],
+            description=row.get("description"),
+            industry=row.get("industry"),
+            sector=row.get("sector"),
+        )
+        right_texts.append(enriched)
 
     print(f"Computing embeddings:")
-    print(f"  Sponsors: {len(left_texts)}")
-    print(f"  Tickers: {len(right_texts)}")
+    print(f"  Sponsors: {len(left_texts)} (name only)")
+    print(f"  Tickers: {len(right_texts)} (enriched with description/industry/sector)")
 
     # Compute embeddings
     left_embeddings = compute_embeddings(left_texts, model_name)
