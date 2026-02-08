@@ -1,0 +1,53 @@
+sponsor_name,ticker,label,confidence,notes
+"22nd Century Group, Inc.",XXII,correct,0.9941,Exact company match
+"9 Meters Biopharma, Inc.",NMTRQ,correct,0.9724,Correct - NMTRQ is bankrupt ticker (Q suffix)
+60 Degrees Pharmaceuticals LLC,SXTP,correct,0.9265,Exact company match
+4D pharma plc,LBPWQ,incorrect,0.8483,LBPWQ is a warrant not the stock - should be LBPS
+3M,MMM,correct,0.7815,Correct - 3M Company common abbreviation
+3SBIO AU PTY LTD,TRSBF,correct,0.6705,Australian subsidiary of 3SBio - TRSBF is OTC ticker
+AC Immune SA,ACIU,correct,1.0,clear identical match on sponsor and ticker name!
+"ADMA Biologics, Inc.",ADMA,correct,1.0,identical match of sponsor and ticker name!
+"AEON Biopharma, Inc.",AEON,correct,1.0,identical match of sponsor and ticker name!
+AIM ImmunoTech Inc.,AIM,correct,1.0,identical matching of sponsor and ticker name!
+ADC Therapeutics S.A.,ADCT,correct,0.9499,"almost identical match, just slight different spelling of SA/S.A. (In Swiss companonyme (French) or Società Anonima (Italian), which translates to a Public Limited Company (PLC) or Corporation)"
+ALX Oncology Inc.,ALXO,correct,0.8185,ALX Oncology (Nasdaq: ALXO) is a clinical-stage biotechnology company advancing therapies that boost the immune system to treat cancer and extend patients’ lives.
+AEYE Health Inc,LIDRW,incorrect,0.7378,"AEye, Inc., together with its subsidiaries, provides lidar systems for vehicle autonomy, advanced driver-assistance systems, and robotic vision applications in the United States, Europe, and the Asia Pacific. (www.aeye.ai)"
+AION Biosystems,ANTCF,incorrect,0.7361,Aion Therapeutic Inc. engages in the health and wellness business in the United States. The company was formerly known as Osoyoos Cannabis Inc. and changed its name to Aion Therapeutic Inc. in August 2020. Aion Biosystems are a company dedicated to dramatically expanding the use and value of Remote Patient Monitoring through a unique product and technology platform.
+ACRO Biomedical Co. Ltd,ACBM,correct,0.7175,"The ticker name is actually misspelled in the return from Massive API, it is actually ACRO on Yahoo Finance: https://finance.yahoo.com/quote/ACBM/profile/"
+ACADIA Pharmaceuticals Inc.,ACAD,correct,1.0,exact sponsor to ticker name match!
+Accuray Incorporated,ARAY,correct,1.0,perfect match!
+"Aclaris Therapeutics, Inc.",ACRS,correct,1.0,perfect match!
+Actinium Pharmaceuticals,ATNM,correct,0.9528,"exact match between sponsor and ticker name aside from the "", Inc"" in the ticker name."
+Acura Pharmaceuticals Inc.,ACUR,correct,0.9442,"ticker name is misspelled in return from Massive API, it should actually be Acura Pharmaceuticals, Inc. (source: https://finance.yahoo.com/quote/ACUR/)"
+"Abeona Therapeutics, Inc",ABEO,correct,0.9158,ticker name is written as Abeona Therapeutics Inc. on https://finance.yahoo.com/quote/ABEO/
+Actuate Therapeutics Inc.,ACTU,correct,0.9131,"on https://finance.yahoo.com/quote/ACTU/ in the overview, the company name is mentioned as being ""Actuate Therapeutics, Inc., a clinical-stage biopharmaceutical company, develops therapies for the treatment of cancers in the United States."""
+Acurx Pharmaceuticals Inc.,ACXP,correct,0.9116,"named Acurx Pharmaceuticals, Inc. on https://finance.yahoo.com/quote/ACXP/"
+"Aardvark Therapeutics, Inc.",AARD,correct,0.911,"named Aardvark Therapeutics, Inc. on https://finance.yahoo.com/quote/AARD/"
+"ARS Pharmaceuticals, Inc.",SPRY,correct,0.9052,"named ARS Pharmaceuticals, Inc. on https://finance.yahoo.com/quote/SPRY/"
+"AN2 Therapeutics, Inc",ANTX,correct,0.9003,"named AN2 Therapeutics, Inc. on https://finance.yahoo.com/quote/ANTX/"
+Acutus Medical,AFIB,correct,0.8925,"exact match, just missing an "", Inc."" in sponsor name"
+Acacia Pharma Ltd,ACTG,incorrect,0.8876,"Acacia (NASDAQ: ACTG) is a value-oriented acquirer of businesses across public and private markets, focused on opportunistic situations within the industrials, energy, and technology sectors. Acacia Pharma is a wholly owned subsidiary of Eagle Pharmaceuticals offering a portfolio of assets focused on helping improve the care of patients undergoing serious medical treatments such as surgery, invasive procedures, or chemotherapy."
+"Acuity Medical International, Inc.",AYI,incorrect,0.8828,"Acuity Inc. is a market-leading industrial technology company. We use technology to solve problems in spaces, light and more things to come.Acuity International works closely with international, federal, state, and local governments around the world to build safe, secure, healthy, and thriving communities. We are a single source for healthcare, humanitarian, disaster and emergency response, and facilities management in all corners of the world."
+Achieve Life Sciences,ACHV,correct,0.8813,"Achieve Life Sciences, Inc., a late-stage pharmaceutical company, develops and commercializes cytisinicline for nicotine independence in Canada, the United States, and the United Kingdom. A clinical trial (NCT05206370) with the sponsor name Achieve Life Sciences is titled ""A Second Study of Cytisinicline for Smoking Cessation in Adult Smokers (ORCA-3)""."
+ARYx Therapeutics,ARYX,correct,0.88,"from https://finance.yahoo.com/quote/ARYX/, we can see that ARYx Therapeutics, Inc. discovers and develops novel therapies for large, chronic, and oral markets. The company uses its RetroMetabolic Drug Design technology to design structurally unique molecules that retain the efficacy of original drugs."
+Acumen Pharmaceuticals,ABOS,correct,0.8588,"on https://finance.yahoo.com/quote/ABOS/, the ticker name is Acumen Pharmaceuticals, Inc."
+"ASKA Pharmaceutical Co., Ltd.",ASKPF,correct,0.8328,"from yahoo finance, https://finance.yahoo.com/quote/4886.T/, we see the ticker name ""ASKA Pharmaceutical Holdings Co.,Ltd."". The clinical trial NCT03931915 mentions endometriosis and has the sponsor ""ASKA Pharmaceutical Co., Ltd."". The company researches, develops, manufactures, and markets pharmaceutical products in the areas of endocrinology, obstetrics and gynecology, and urology."
+AbbVie,ABBV,correct,0.8323,"on https://finance.yahoo.com/quote/ABBV/, the ticker name is ""AbbVie Inc."""
+Acusphere,ACUS,correct,0.8037,"on yahoo finance, the ticker name is ""Acusphere, Inc."" and operates as a specialty pharmaceutical company that develops and commercializes cardiovascular drugs."
+Abbott Products,ABT,correct,0.7984,"+6 Abbott Laboratories GmbH represents the German operations of the American healthcare multinatig in diagnostics, medical devices, nutritionals, and branded generic pharmaceuticals. the clinical trial NCT01747330 has a study director that works there and the sponsor name is Abbott Products."
+Adagene Inc,ADAG,correct,0.761,"the yahoo finance page https://finance.yahoo.com/quote/ADAG/ has the ticker name ""Adagene Inc."""
+Adaptive Biotechnologies,ADPT,correct,0.7533,"the yahoo finance page https://finance.yahoo.com/quote/ADPT/ has the ticker name ""Adaptive Biotechnologies Corporation""."
+AKARI Therapeutics,AKTX,correct,0.7437,"Akari Therapeutics, Plc develops next-generation antibody-drug conjugates (ADC) for cancer-killing toxins."
+AMES Technology,ATLO,incorrect,0.7325,"from the ticker page on yahoo finance: Ames National Corporation operates as a multi-bank holding company that provides banking products and services primarily in Boone, Clarke, Hancock, Marshall, Polk, Story, Taylor, and Union Counties in central, north-central, and south-central Iowa."
+"Adamas Pharmaceuticals, Inc.",ADAM,incorrect,0.7259,"Adamas Trust, Inc. acquires, invests in, finances, and manages mortgage-related single-family and multi-family residential assets in the United States."
+"1ST Biotherapeutics, Inc.",ARQT,incorrect,0.7111,"1ST Biotherapuetics, Inc. is also known as 1STBIO and are developing a portfolio of drug candidates in the field of Neurodegenerative Disease, Immuno-Oncology and Rare Disease as well as developing Genomic-based target discovery platform for neurodegenerative target and biomarker discovery. Arcutis works mainly with dermatological products."
+Acorn Biolabs Inc.,ACFN,incorrect,0.7065,"Acorn Energy, Inc., through its subsidiary, develops and markets wireless remote monitoring and control systems in the United States and internationally."
+Acrotech Biopharma Inc.,RGTLF,incorrect,0.6929,two distinct websites https://acrotechbiopharma.com/ and https://argentbiopharma.com/ and are located in different states.
+Adagio Medical,ADGM,correct,0.6765,"yahoo finance page links to https://adagiomedical.com/, where the name of the company is listed as Adagio Medical Holdings Inc and Adagio Medical Inc."
+"Active Life Scientific, Inc.",AHFD,incorrect,0.6716,"Active Life Scientific, Inc. (ALSI), founded in 2007 and based in Santa Barbara, CA, is a medical technology company specializing in innovative,, radiation-free bone health assessment. Active Health Foods, Inc. (OTC: AHFD) is a California-based company founded in 2008, initially focused on developing organic energy bars and beverages like Active X Bars. As of 2026, the company operates primarily as a shell company."
+"Adynxx, Inc.",ADYX,correct,0.9754,Confirmed match
+Adial Pharmaceuticals,ADIL,correct,0.9292,Confirmed match
+"Adhera Health, Inc.",ATRX,incorrect,0.9091,"Adhera Therapeutics, Inc., a biotech company, focuses on the discovery, development, and commercialization of small molecule drugs. The company is developing MLR-1019 for the treatment of Parkinson's disease; and MLR -1023 to treat Type 1 diabetes. The company was formerly known as Marina Biotech, Inc. and changed its name to Adhera Therapeutics, Inc. in October 2018. Adhera Therapeutics, Inc. is based in Baton Rouge, Louisiana. Adhera Health offers the Adhera Caring Digital Program (ACDP) is a mobile-first, AI-enabled solution designed to support families managing pediatric chronic conditions."
+"Advanced Life Sciences, Inc.",ACHV,incorrect,0.8957,Different companies
+"Aditxt, Inc.",ADTX,correct,0.8834,Confirmed match
+"Aduro Biotech, Inc.",ADUR,incorrect,0.7401,"Aduro Biotech, Inc. was a Berkeley, California-based clinical-stage immunotherapy company focused on discovering treatments for cancer and autoimmune diseases using LADD and STING platforms. Founded in 2000, it aimed to harness the body's immune system. In 2020, Aduro completed a merger with Chinook Therapeutics, Inc. and subsequently changed its name.Aduro Clean Technologies Inc. engages in developing water-based chemical recycling technologies."
