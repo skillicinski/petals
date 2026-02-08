@@ -10,7 +10,7 @@ Flow:
 2. Token-based pre-filter (blocking) to reduce candidate pairs
 3. Compute embeddings for filtered entities
 4. Cosine similarity scoring
-5. Optimal 1:1 bipartite matching (greedy)
+5. Optimal 1:1 bipartite matching (greedy or Hungarian algorithm)
 6. Threshold-based classification
 
 Environment variables:
@@ -22,6 +22,7 @@ Environment variables:
     RUN_ID: Pipeline run identifier (default: auto-generated UUID)
     EMBEDDING_MODEL: Sentence-transformer model (default: all-MiniLM-L6-v2)
     SKIP_BLOCKING: Set to '1' to skip token pre-filter (slower but complete)
+    MATCHING_ALGORITHM: 'greedy' or 'hungarian' (default: hungarian)
 
 Usage:
     # Local development
@@ -48,6 +49,7 @@ from .config import (
     STATUS_REJECTED,
 )
 from .extract import fetch_sponsors, fetch_tickers
+from .matching import greedy_matching, hungarian_matching
 
 # Lazy import to avoid loading torch until needed
 _model = None
@@ -160,38 +162,45 @@ def select_best_matches(
     left_key: str = "sponsor_name",
     right_key: str = "ticker",
     min_confidence: float = 0.0,
+    algorithm: str = "hungarian",
 ) -> pl.DataFrame:
-    """Select optimal 1:1 matches using greedy assignment.
+    """Select optimal 1:1 matches using specified algorithm.
 
-    For each sponsor, selects highest-confidence ticker not already matched.
+    Args:
+        all_pairs_df: All candidate pairs with scores
+        left_key: Column name for left entities (sponsors)
+        right_key: Column name for right entities (tickers)
+        min_confidence: Minimum confidence threshold
+        algorithm: 'greedy' or 'hungarian' (default: hungarian)
+
+    Returns:
+        DataFrame with selected 1:1 matches
+
+    Matching Algorithms:
+    -------------------
+    - greedy: Fast (O(n²)), locally optimal, baseline
+    - hungarian: Slower (O(n³)), globally optimal, recommended
     """
-    df = all_pairs_df.filter(pl.col("confidence") >= min_confidence)
+    if algorithm == "hungarian":
+        result = hungarian_matching(
+            all_pairs_df,
+            left_key=left_key,
+            right_key=right_key,
+            score_key="confidence",
+            min_score=min_confidence,
+        )
+    elif algorithm == "greedy":
+        result = greedy_matching(
+            all_pairs_df,
+            left_key=left_key,
+            right_key=right_key,
+            score_key="confidence",
+            min_score=min_confidence,
+        )
+    else:
+        raise ValueError(f"Unknown matching algorithm: {algorithm}. Use 'greedy' or 'hungarian'")
 
-    if len(df) == 0:
-        return df
-
-    df = df.sort("confidence", descending=True)
-
-    matched_left: set[str] = set()
-    matched_right: set[str] = set()
-    selected_rows = []
-
-    for row in df.iter_rows(named=True):
-        left_val = row[left_key]
-        right_val = row[right_key]
-
-        if left_val in matched_left or right_val in matched_right:
-            continue
-
-        matched_left.add(left_val)
-        matched_right.add(right_val)
-        selected_rows.append(row)
-
-    if not selected_rows:
-        return df.head(0)
-
-    result = pl.DataFrame(selected_rows)
-    print(f"[main] 1:1 matching: {len(result)} unique pairs")
+    print(f"[main] 1:1 matching ({algorithm}): {len(result)} unique pairs")
 
     return result
 
@@ -296,6 +305,7 @@ def run_pipeline(
     output_path: str = "data/candidates.parquet",
     skip_blocking: bool = False,
     save_iceberg: bool = False,
+    matching_algorithm: str = "hungarian",
 ) -> pl.DataFrame:
     """Run the entity resolution pipeline.
 
@@ -306,6 +316,7 @@ def run_pipeline(
         output_path: Path for output parquet file
         skip_blocking: Skip token pre-filter (compare all pairs)
         save_iceberg: Save results to Iceberg table
+        matching_algorithm: 'greedy' or 'hungarian' (default: hungarian)
 
     Returns:
         DataFrame with 1:1 matched candidates
@@ -321,6 +332,7 @@ def run_pipeline(
         f"reject<{CONFIDENCE_AUTO_REJECT:.0%}"
     )
     print(f"[main] Blocking: {'disabled' if skip_blocking else 'enabled'}")
+    print(f"[main] Matching: {matching_algorithm}")
 
     # === Extract ===
     print("\n[main] === EXTRACT ===")
@@ -368,6 +380,7 @@ def run_pipeline(
         left_key="sponsor_name",
         right_key="ticker",
         min_confidence=CONFIDENCE_AUTO_REJECT,
+        algorithm=matching_algorithm,
     )
 
     # Add metadata and rename columns for output
@@ -428,6 +441,7 @@ if __name__ == "__main__":
     output_path = os.environ.get("OUTPUT_PATH", "data/candidates.parquet")
     skip_blocking = os.environ.get("SKIP_BLOCKING", "0") == "1"
     save_iceberg = os.environ.get("SAVE_ICEBERG", "0") == "1"
+    matching_algorithm = os.environ.get("MATCHING_ALGORITHM", "hungarian")
 
     run_pipeline(
         limit_sponsors=limit_sponsors,
@@ -436,4 +450,5 @@ if __name__ == "__main__":
         output_path=output_path,
         skip_blocking=skip_blocking,
         save_iceberg=save_iceberg,
+        matching_algorithm=matching_algorithm,
     )
