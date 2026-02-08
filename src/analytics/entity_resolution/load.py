@@ -1,16 +1,15 @@
-"""Load data from S3 Tables warehouse for entity resolution analysis.
+"""Load data for entity resolution analysis.
 
-This module provides data access for the entity resolution analytics workload.
-Unlike pipelines (which move data), this loads data from the warehouse for
-local analysis and model development.
+Loads entities from S3 Tables warehouse for local analysis and model development.
+This is the data access layer for the entity resolution analytics workload.
 
 Data Sources:
 -------------
 - Sponsors: clinical.trials table (sponsor entities from clinical trials)
 - Tickers: market.ticker_details table (public company information)
 
-The warehouse is built and maintained by upstream pipelines. This module
-simply reads from it for analytical purposes.
+Unlike pipelines (which move/transform data), this module loads data from the
+warehouse into memory for exploratory analysis and ML model development.
 """
 
 import os

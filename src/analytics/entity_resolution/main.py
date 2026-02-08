@@ -50,7 +50,7 @@ from .config import (
     STATUS_PENDING,
     STATUS_REJECTED,
 )
-from .warehouse import load_sponsors, load_tickers
+from .load import load_sponsors, load_tickers
 from .matching import greedy_matching, hungarian_matching
 
 # Lazy import to avoid loading torch until needed
