@@ -9,7 +9,7 @@ import pyarrow as pa
 from pyiceberg.catalog import load_catalog
 from pyiceberg.exceptions import NoSuchTableError
 from pyiceberg.schema import Schema
-from pyiceberg.types import DoubleType, IntegerType, NestedField, StringType
+from pyiceberg.types import IntegerType, LongType, NestedField, StringType
 
 # Schema for ticker details
 # (ticker, market) composite key matches the tickers table
@@ -19,7 +19,7 @@ TICKER_DETAILS_SCHEMA = Schema(
     NestedField(3, "name", StringType(), required=False),
     NestedField(4, "description", StringType(), required=False),
     NestedField(5, "homepage_url", StringType(), required=False),
-    NestedField(6, "market_cap", DoubleType(), required=False),
+    NestedField(6, "market_cap", LongType(), required=False),
     NestedField(7, "total_employees", IntegerType(), required=False),
     NestedField(8, "locale", StringType(), required=False),
     NestedField(9, "primary_exchange", StringType(), required=False),
@@ -41,7 +41,7 @@ TICKER_DETAILS_ARROW_SCHEMA = pa.schema(
         pa.field("name", pa.string(), nullable=True),
         pa.field("description", pa.string(), nullable=True),
         pa.field("homepage_url", pa.string(), nullable=True),
-        pa.field("market_cap", pa.float64(), nullable=True),
+        pa.field("market_cap", pa.int64(), nullable=True),
         pa.field("total_employees", pa.int32(), nullable=True),
         pa.field("locale", pa.string(), nullable=True),
         pa.field("primary_exchange", pa.string(), nullable=True),

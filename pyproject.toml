@@ -12,7 +12,7 @@ dependencies = [
     "polars>=1.37.1",
     "psutil>=5.9.0",
     "pyarrow>=22.0.0",
-    "pyiceberg>=0.10.0",
+    "pyiceberg[pyiceberg-core]>=0.10.0",
     "s3fs>=2024.0.0",
     "sentence-transformers>=3.0.0",
     "yfinance==1.1.0",
